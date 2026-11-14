@@ -483,6 +483,8 @@ http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (url.pathname.startsWith('/api/')) {
+      // 이 컴퓨터 주소로 온 요청만 받는다 (다른 사이트가 DNS 재바인딩으로 교회 자료를 읽어 가지 못하게)
+      if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(String(req.headers.host || ''))) throw new HttpError(403, '이 컴퓨터 주소(localhost)로만 열 수 있습니다.');
       const origin = req.headers.origin;
       if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) throw new HttpError(403, '다른 사이트에서 온 요청은 막혀 있습니다.');
       return await api(req, res, url);
