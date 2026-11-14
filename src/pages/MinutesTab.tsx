@@ -361,10 +361,8 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
 function SttSetup({ st, load, onClose }: { st: Stt | null; load: () => Promise<void>; onClose: () => void }) {
   const { base } = useApp();
   const [err, setErr] = useState('');
-  const [copied, setCopied] = useState(false);
   const get = async (path: string) => { setErr(''); try { await api(`${base}${path}`, { method: 'POST' }); await load(); } catch (e: any) { setErr(e.message); } };
   const prog = (k: string) => { const x = st?.installs[k]; return x ? (x.error ? <span className="warn-text small">{x.error}</span> : <span className="small">받는 중 {Math.round((x.done / x.size) * 100)}% ({mb(x.done)} / {mb(x.size)})</span>) : null; };
-  const copy = async () => { try { await navigator.clipboard.writeText('brew install whisper-cpp'); setCopied(true); } catch { setCopied(false); } };
   return (
     <div className="dialog-back" onClick={onClose}>
       <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
@@ -379,9 +377,16 @@ function SttSetup({ st, load, onClose }: { st: Stt | null; load: () => Promise<v
                 : <p className="small">이 컴퓨터(ARM 윈도우)용 엔진은 아직 자동으로 받을 수 없습니다.</p>)}
               {!st.engine && st.platform === 'mac' && (
                 <div className="small" style={{ marginTop: 6 }}>
-                  {st.brew ? <>터미널을 열고 아래 명령을 붙여 넣어 실행하세요. 끝나면 <button className="link" onClick={load}>다시 확인</button>.
-                    <div className="row" style={{ marginTop: 4 }}><code>brew install whisper-cpp</code><button className="small" onClick={copy}>{copied ? '복사됨' : '복사'}</button></div></>
-                    : <>맥에서는 Homebrew(https://brew.sh)로 whisper-cpp 를 설치합니다. Homebrew 설치가 어려우시면 카카오 오픈채팅으로 문의해 주세요. 그동안은 클로바노트 등에서 받은 녹취록 글을 붙여 넣어 AI 정리를 쓸 수 있습니다.</>}
+                  <ol className="mac-steps">
+                    <li><b>터미널 열기</b>: ⌘+스페이스 → '터미널' 입력 → Enter</li>
+                    {!st.brew && <li><b>Homebrew 설치</b> (맥에 프로그램을 설치해 주는 무료 도구, 처음 한 번): 아래 명령을 붙여 넣고 Enter. 맥 로그인 암호를 물으면 입력하세요(글자가 보이지 않아도 입력됩니다). 5~10분 걸립니다.
+                      <Cmd text={HOMEBREW} /></li>}
+                    <li><b>녹취 엔진 설치</b>: 아래 명령을 붙여 넣고 Enter. 몇 분 걸립니다.
+                      <Cmd text="brew install whisper-cpp" />
+                      <span className="muted">"brew: command not found"가 나오면 애플 칩 맥은 <code>/opt/homebrew/bin/brew install whisper-cpp</code>, 인텔 맥은 <code>/usr/local/bin/brew install whisper-cpp</code> 를 넣으세요.</span></li>
+                    <li>끝나면 <button className="link" onClick={load}>다시 확인</button>을 누르고, 아래 ② 모델을 받습니다.</li>
+                  </ol>
+                  <p className="muted">어려우시면 카카오 오픈채팅으로 물어 주세요. 그동안은 클로바노트 등에서 받은 녹취록 글을 붙여 넣어 AI 정리를 쓸 수 있습니다.</p>
                 </div>
               )}
             </div>
@@ -463,4 +468,17 @@ function MeetingTypes({ data, onClose, reload }: { data: AdminData; onClose: () 
       </div>
     </div>
   );
+}
+
+const HOMEBREW = '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"';
+// 명령 한 줄 + 복사 단추
+function Cmd({ text }: { text: string }) {
+  const [ok, setOk] = useState('');
+  const copy = async () => {
+    let done = false;
+    try { await navigator.clipboard.writeText(text); done = true; } catch { /* 아래 방식 */ }
+    if (!done) { const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0'; document.body.appendChild(t); t.select(); try { done = document.execCommand('copy'); } catch { done = false; } t.remove(); }
+    setOk(done ? '복사됨' : '직접 선택해 복사해 주세요');
+  };
+  return <div className="cmd"><code>{text}</code><button className="small" onClick={copy}>{ok || '복사'}</button></div>;
 }

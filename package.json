@@ -1,7 +1,7 @@
 {
   "name": "church-workspace",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "1인 목회자용 교회 운영 워크스페이스",
   "scripts": {

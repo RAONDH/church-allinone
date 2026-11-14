@@ -133,6 +133,7 @@
     <span class="grow"></span>
     <a href="#features" class="hide-m">할 수 있는 것</a>
     <a href="#cost" class="hide-m">비용·AI</a>
+    <a href="#booth" class="hide-m">방송실</a>
     <a href="#faq" class="hide-m">자주 묻는 질문</a>
     <a href="#install">설치 방법</a>
     <a href="https://open.kakao.com/o/gSkET2Wi" class="hide-m" target="_blank" rel="noopener">문의하기</a>
@@ -270,7 +271,7 @@
       <tr><td><b>기본 기능</b><br><span class="note">이번 주 준비함, 예배 정보, 콘티, 자막 확정, 성도·재정·일정·증명서</span></td><td>프로그램만 설치하면 됩니다</td><td><span class="ok">무료</span></td></tr>
       <tr><td><b>AI 기능</b><br><span class="note">설교 인포그래픽·블로그 글·나눔지, 찬양 추천, 회의록 AI 정리</span></td><td><b>Claude 유료 구독</b>(Pro 이상) + Claude Code 설치·로그인<br>또는 <b>ChatGPT 유료 구독</b>(Plus 이상) + Codex 설치·로그인</td><td>이미 내시는 구독료 외에 추가 요금 없음. 대신 <b>구독의 사용 한도</b>를 함께 씁니다</td></tr>
       <tr><td><b>찬양 추천을 Gemini로</b></td><td>Google Gemini API 키 (PraiseFlow 'AI 연결')</td><td>구글의 무료 사용량 안에서는 무료, 넘으면 <b>구글 요금이 붙을 수 있습니다</b></td></tr>
-      <tr><td><b>회의록 받아 적기</b></td><td>음성 인식 프로그램(whisper)과 모델을 처음 한 번 받기</td><td><span class="ok">무료</span> (이 컴퓨터에서 처리)</td></tr>
+      <tr><td><b>회의록 받아 적기</b></td><td>음성 인식 프로그램(whisper)과 모델을 처음 한 번 받기 — 윈도우는 단추로, 맥은 터미널에서 한 번 설치 (<a href="#stt-setup">방법</a>)</td><td><span class="ok">무료</span> (이 컴퓨터에서 처리)</td></tr>
     </table>
     <p class="note">구독 종류와 조건은 각 회사 정책에 따라 바뀔 수 있습니다 (2026년 11월 기준). AI 구독이 없어도 기본 기능은 모두 쓸 수 있습니다.</p>
 
@@ -287,6 +288,21 @@
         <li>라온 교회 올인원에서 <b>다시 확인</b>을 누르면 'AI 연결됨'이 나옵니다.</li>
       </ol></div>
     </div>
+    <h3 id="stt-setup" style="margin:30px 0 8px;font-size:20px">회의 녹음 받아 적기 준비 (처음 한 번)</h3>
+    <div class="steps">
+      <div class="card"><h3>🪟 윈도우</h3><ol>
+        <li>행정 → 회의록 → <b>녹취 준비</b>를 엽니다.</li>
+        <li><b>엔진 받기</b>(22MB)를 누릅니다.</li>
+        <li><b>정확한 모델 받기</b>(574MB)를 누릅니다. 느린 컴퓨터는 가벼운 모델(190MB).</li>
+      </ol></div>
+      <div class="card"><h3>🍎 맥</h3><ol>
+        <li><b>⌘+스페이스</b> → '터미널' 입력 → Enter로 터미널을 엽니다.</li>
+        <li>Homebrew(맥용 무료 설치 도구)가 없으면 아래를 붙여 넣고 Enter. 맥 로그인 암호를 물으면 입력합니다(5~10분).<br><code style="word-break:break-all">/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></li>
+        <li><code>brew install whisper-cpp</code> 를 붙여 넣고 Enter. "command not found"가 나오면 애플 칩은 <code>/opt/homebrew/bin/brew install whisper-cpp</code>, 인텔은 <code>/usr/local/bin/brew install whisper-cpp</code></li>
+        <li>라온 교회 올인원 <b>녹취 준비</b>에서 <b>다시 확인</b> → <b>정확한 모델 받기</b>(574MB)</li>
+      </ol></div>
+    </div>
+    <p class="note">명령은 프로그램의 '녹취 준비' 창에도 복사 단추와 함께 있습니다. 녹취 엔진이 없어도 클로바노트 등에서 받은 녹취록 글을 붙여 넣으면 AI 정리는 쓸 수 있습니다.</p>
     <p class="note">터미널이 낯서시면 <a href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">카카오 오픈채팅</a>으로 물어 주세요.</p>
   </section>
 
@@ -324,15 +340,32 @@
     <p class="sub" style="margin-top:16px">새 버전은 같은 방법으로 받아 바꾸면 됩니다. 입력한 교회 자료는 그대로 남습니다.</p>
   </section>
 
+  <section id="booth">
+    <h2>방송실·성도 컴퓨터에는 예배송출만 설치하세요</h2>
+    <p class="sub">자막을 띄우는 방송실 컴퓨터나, 자막을 맡아 주는 성도의 컴퓨터에는 라온 교회 올인원 전체를 깔 필요가 없습니다. <b>예배송출</b>만 따로 받아 설치하면 됩니다.</p>
+    <div class="steps">
+      <div class="card"><h3>📺 예배송출만 받기</h3>
+        <p>아래 예배송출 소개 페이지에서 맥용·윈도우용을 받아 설치합니다. 무료이고, 설치 방법도 그 페이지에 있습니다.</p>
+        <p style="margin-top:12px"><a class="btn" style="min-width:0;font-size:16px;padding:10px 16px" href="https://raon-easypaster.github.io/worship-caster/">예배송출 받으러 가기</a></p></div>
+      <div class="card"><h3>🏠 준비는 다른 곳에서, 송출은 방송실에서</h3><ol>
+        <li>목회자(라온 교회 올인원) 또는 자막 담당 성도가 <b>자기 컴퓨터에서</b> 콘티·자막을 준비합니다. 집에서 해도 됩니다.</li>
+        <li>준비한 컴퓨터의 예배송출에서 <b>백업</b>을 눌러 자료 파일을 받습니다.</li>
+        <li>그 파일을 USB·카카오톡·클라우드 드라이브 등으로 방송실 컴퓨터에 옮깁니다.</li>
+        <li>방송실 컴퓨터의 예배송출에서 <b>복원</b>으로 그 파일을 열면 같은 자막이 준비됩니다.</li>
+      </ol>
+      <p class="note">복원하면 방송실 컴퓨터의 예배송출 자료가 옮겨 온 파일 내용으로 바뀔 수 있습니다. 방송실에서 따로 고친 것이 있으면 먼저 그쪽에서도 백업을 받아 두세요.</p></div>
+    </div>
+  </section>
+
   <section id="faq">
     <h2>자주 묻는 질문</h2>
     <p class="sub">"우리 교회에서도 될까?" 싶으실 때 먼저 보세요.</p>
     <details class="faq"><summary>휴대폰이나 태블릿에서도 되나요?</summary>
       <p>설치와 입력은 <b>맥·윈도우 컴퓨터</b>에서만 됩니다. 휴대폰·태블릿 앱은 없습니다. 대신 만든 인포그래픽·나눔지는 휴대폰에서 보기 좋게 만들어지고, 구글 캘린더에 휴대폰으로 적은 일정은 이어 두면 여기 달력에 나옵니다.</p></details>
     <details class="faq"><summary>여러 사람이 함께 쓸 수 있나요?</summary>
-      <p>지금은 <b>컴퓨터 한 대에서 한 사람이 쓰는</b> 프로그램입니다. 여러 컴퓨터 사이의 동기화나 동시 편집은 아직 없습니다. 방송 담당자와 나누려면 콘티 '카톡용 글 복사'나 인쇄를 쓰세요.</p></details>
+      <p>지금은 <b>컴퓨터 한 대에서 한 사람이 쓰는</b> 프로그램입니다. 여러 컴퓨터 사이의 동기화나 동시 편집은 아직 없습니다. 방송 담당자와 나누려면 콘티 '카톡용 글 복사'나 인쇄를 쓰고, 자막은 예배송출 <b>백업 파일</b>로 방송실·성도 컴퓨터에 옮기세요(<a href="#booth">방법</a>).</p></details>
     <details class="faq"><summary>방송실 컴퓨터에서는 어떻게 쓰나요?</summary>
-      <p>자막을 내보낼 컴퓨터(TV·프로젝터나 OBS가 연결된 컴퓨터)에 설치해 쓰시는 것이 가장 간단합니다. 함께 들어 있는 예배송출이 자막을 띄우며, 화면 연결 방법은 <a href="https://raon-easypaster.github.io/worship-caster/">예배송출 안내</a>를 따르세요. 준비는 목양실에서, 송출은 방송실에서 하시려면 지금은 한 컴퓨터를 함께 쓰셔야 합니다.</p></details>
+      <p>방송실 컴퓨터에는 <a href="https://raon-easypaster.github.io/worship-caster/">예배송출</a>만 따로 설치하면 됩니다. 목양실이나 집에서 준비한 자막은 예배송출의 <b>백업 → 복원</b>으로 방송실 컴퓨터에 옮깁니다(위 <a href="#booth">방송실·성도 컴퓨터</a> 참고). TV·프로젝터·OBS 연결 방법은 예배송출 안내를 따르세요.</p></details>
     <details class="faq"><summary>이미 예배송출을 쓰고 있는데 자료가 없어지나요?</summary>
       <p>라온 교회 올인원은 예배송출 자료를 지우지 않습니다. 이번 주 예배를 만들 때 예배송출에 새 예배 순서를 더하고, 지난 순서는 그대로 둡니다. 그래도 처음 쓰시기 전에 <b>예배송출에서 백업(zip)을 받아 두시길</b> 권합니다. 윈도우판은 예배송출이 묶음 안에 함께 들어 있으니, 따로 쓰시던 예배송출 자료는 백업 zip으로 옮겨 주세요.</p></details>
     <details class="faq"><summary>인터넷이 끊기면 어떻게 되나요?</summary>

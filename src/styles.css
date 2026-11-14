@@ -346,3 +346,7 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 .color-pick > div { position: absolute; z-index: 5; top: 26px; left: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; display: grid; grid-template-columns: repeat(5, 22px); gap: 5px; box-shadow: 0 4px 14px rgba(0,0,0,.12); }
 .color-pick > div button { width: 22px; height: 22px; padding: 0; border-radius: 5px; border: none; }
 .gcal-list li { flex-wrap: wrap; }
+.mac-steps { padding-left: 20px; margin: 6px 0; }
+.mac-steps li { margin: 6px 0; }
+.cmd { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+.cmd code { flex: 1; display: block; padding: 6px 8px; overflow-x: auto; white-space: nowrap; }
