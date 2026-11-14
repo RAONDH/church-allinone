@@ -12,11 +12,11 @@ WORK="$(mktemp -d)/교회올인원-설치"
 mkdir -p "$WORK/apps"
 
 echo "▶ 라온 교회 올인원"
-rsync -a --exclude data --exclude node_modules --exclude dist --exclude .DS_Store "$HUB/" "$WORK/교회 올인원/"
+rsync -a --exclude data --exclude node_modules --exclude dist --exclude .git --exclude docs --exclude .DS_Store "$HUB/" "$WORK/교회 올인원/"
 
 if [ -d "$PF" ]; then
   echo "▶ PraiseFlow"
-  rsync -a --exclude node_modules --exclude dist --exclude .env.local --exclude '*.local' --exclude 'backup-*' --exclude .DS_Store "$PF/" "$WORK/apps/PraiseFlow/"
+  rsync -a --exclude node_modules --exclude dist --exclude .git --exclude .env.local --exclude '*.local' --exclude 'backup-*' --exclude .DS_Store "$PF/" "$WORK/apps/PraiseFlow/"
 else echo "⚠️  PraiseFlow 폴더가 없어 빼고 만듭니다: $PF"; fi
 
 if [ -d "$CASTER" ]; then
@@ -50,6 +50,8 @@ cat > "$WORK/읽어 주세요.txt" <<'TXT'
 Gemini API 키 중 하나를 연결해야 쓸 수 있습니다.
 설교 인포그래픽·블로그 글·소그룹 나눔지(예배 화면 '설교 후 자료' 탭)는
 이 맥에 Claude Code 또는 Codex가 설치·로그인되어 있어야 만들 수 있습니다.
+성도 명부·재정·행정(일정·회의록·증명서)도 위 메뉴에서 씁니다. 이 자료는 AI나 인터넷으로 보내지 않습니다.
+회의 녹음을 받아 적으려면 행정 → 회의록 → '녹취 준비'를 먼저 해 주세요(맥은 brew install whisper-cpp).
 자세한 사용법은 프로그램 위 메뉴 '사용설명서'에 있습니다.
 문의: 카카오 오픈채팅 https://open.kakao.com/o/gSkET2Wi
 

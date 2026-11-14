@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
 import { api } from '../lib/api';
 import type { SyncResult, Week, WeekStatus } from '../lib/types';
+import { CareCard } from './People';
 import { fmtDate, nextStep, prepSteps, splitWeeks, type Step } from '../lib/week';
 
 export function StepList({ steps, onGo }: { steps: Step[]; onGo?: (s: Step) => void }) {
@@ -150,6 +151,8 @@ export default function Home() {
           <StepList steps={steps} onGo={(s) => nav(`/week/${primary.id}/${s.tab}`)} />
         </div>
       )}
+
+      <CareCard />
 
       {thisWeek.length > 1 && (
         <div className="card">

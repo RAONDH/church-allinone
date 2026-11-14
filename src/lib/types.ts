@@ -44,3 +44,23 @@ export interface Song {
 }
 
 export interface AppInfo { id: string; name: string; desc: string; icon: string; color: string; port: number; openPath: string; installed: boolean; running: boolean }
+
+export type MemberStatus = 'active' | 'inactive' | 'moved' | 'deceased';
+export interface Member {
+  id: string; name: string; gender: '' | '남' | '여'; birth: string; lunar: boolean; phone: string; address: string;
+  role: string; group: string; baptism: string; baptismDate?: string; baptismPlace?: string; baptismBy?: string; registeredAt: string; status: MemberStatus; familyId: string; relation: string; memo: string;
+  createdAt: number; updatedAt: number;
+}
+export interface Visit { id: string; memberIds: string[]; date: string; kind: string; planned: boolean; note: string; createdAt: number; updatedAt: number }
+export interface People { members: Member[]; visits: Visit[]; attendance: Record<string, string[]> }
+
+export type Fund = '일반재정' | '특별재정' | '지정재정';
+export interface Tx { id: string; date: string; type: 'income' | 'expense'; fund: Fund; category: string; name: string; memberId: string; amount: number; note: string; srcId?: string; createdAt: number; updatedAt: number }
+export interface FinanceSettings { categories: Record<'income' | 'expense', Record<Fund, string[]>>; receipt: { regNo: string; address: string; representative: string } }
+export interface Finance { settings: FinanceSettings; tx: Tx[]; budgets: Record<string, Record<string, number>> }
+
+export interface ChurchEvent { id: string; date: string; endDate: string; time: string; title: string; kind: string; place: string; memo: string }
+export interface Minutes { id: string; date: string; meeting: string; title: string; place: string; attendees: string; content: string; decisions: string; todos?: string; transcript?: string; chair: string; recorder: string; audio?: { file: string; name: string; size: number; at: number }; stt?: { at: number; model: string; seconds: number }; ai?: { at: number; via: string }; createdAt: number; updatedAt: number }
+export interface Cert { id: string; no: string; type: string; date: string; purpose: string; memberId: string; snap: { name: string; gender: string; birth: string; address: string; role: string; registeredAt: string; baptism: string; baptismDate: string; baptismPlace: string; baptismBy: string }; createdAt: number }
+export interface GcalCal { id: string; where: string; name: string; googleName: string; color: string; hidden: boolean; fetchedAt: number; error: string; count: number }
+export interface Admin { events: ChurchEvent[]; minutes: Minutes[]; certs: Cert[]; meetingTypes: string[]; gcals: GcalCal[]; gcalEvents: (ChurchEvent & { cal?: string })[] }

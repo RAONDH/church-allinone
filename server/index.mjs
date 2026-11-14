@@ -8,9 +8,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore, uid } from './store.mjs';
 import { httpWc, memoryWc, findLinks, applyWeek, copyService, summarize, snapshot, fingerprint, diffSnapshots } from './wc.mjs';
-import { sampleWcSeed, sampleHubSeed } from './sample.mjs';
+import { sampleWcSeed, sampleHubSeed, samplePeopleSeed, sampleFinanceSeed, sampleAdminSeed } from './sample.mjs';
 import { aiStatus, generate, LABELS } from './ai.mjs';
 import { KINDS, MIN_NOTES, buildPrompt, extractResult, sampleResult } from './after.mjs';
+import { peopleApi } from './people.mjs';
+import { financeApi } from './finance.mjs';
+import { adminApi, fetchGcal } from './admin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.PORT || 5191);
@@ -34,16 +37,35 @@ const spaces = {
 };
 async function resetSample() {
   sampleWc.reset();
-  await spaces.sample.store.reset(sampleHubSeed(await sampleWc.state()));
+  const people = samplePeopleSeed();
+  await spaces.sample.store.reset({ ...sampleHubSeed(await sampleWc.state()), ...people, peopleSeeded: true, finance: sampleFinanceSeed(people.members), financeSeeded: true, ...sampleAdminSeed(people.members), adminSeeded: true });
 }
 if (!spaces.sample.store.db.church) await resetSample();
+// 성도 명부가 생기기 전에 만든 예제 자료에도 예제 성도를 한 번 넣어 준다 (실제 교회 자료에는 넣지 않음)
+{
+  const db = spaces.sample.store.db;
+  if (!db.peopleSeeded) { Object.assign(db, samplePeopleSeed(), { peopleSeeded: true }); await spaces.sample.store.save(); }
+  if (!db.adminSeeded) { Object.assign(db, sampleAdminSeed(db.members), { adminSeeded: true }); await spaces.sample.store.save(); }
+  if (!db.financeSeeded) { Object.assign(db, { finance: sampleFinanceSeed(db.members), financeSeeded: true }); await spaces.sample.store.save(); }
+}
+
+// 구글 캘린더(비공개 주소)를 연결해 두었으면 15분마다 새로 받아 둔다 (화면을 열지 않아도 홈·달력에 최신 일정)
+async function refreshGcal() {
+  const db = spaces.real.store.db;
+  const cals = db.gcals || (db.gcal ? [db.gcal] : []);
+  if (!cals.length) return;
+  for (const g of cals) await fetchGcal(g);
+  await spaces.real.store.save();
+}
+setTimeout(() => refreshGcal().catch(() => {}), 5000);
+setInterval(() => refreshGcal().catch(() => {}), 15 * 60 * 1000).unref();
 
 // ── 도움 함수 ─────────────────────────────────────
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
-async function body(req) {
+async function body(req, max = 5e6) {
   let s = '';
-  for await (const c of req) { s += c; if (s.length > 5e6) throw new HttpError(413, '보낸 자료가 너무 큽니다.'); }
+  for await (const c of req) { s += c; if (s.length > max) throw new HttpError(413, '보낸 자료가 너무 큽니다.'); }
   try { return s ? JSON.parse(s) : {}; } catch { throw new HttpError(400, '자료 형식이 올바르지 않습니다.'); }
 }
 const str = (v, n = 200) => String(v ?? '').slice(0, n);
@@ -402,6 +424,13 @@ async function api(req, res, url) {
     await sp.store.save();
     return send(res, 200, { ok: true, recs: w.recs });
   }
+  // ── 성도 명부 · 심방 · 출석 ──
+  if (await peopleApi({ sub, req, res, db, save: () => sp.store.save(), body, send, HttpError })) return;
+  // ── 재정 (장부 · 예산 · 기부금 영수증) ──
+  if (await financeApi({ sub, req, res, url, db, save: () => sp.store.save(), body, send, HttpError })) return;
+  // ── 행정 (일정 · 회의록 · 증명서) ──
+  if (await adminApi({ sub, req, res, db, save: () => sp.store.save(), body, send, HttpError, sample: r[1] === 'sample', dataDir: DATA_DIR, ws: r[1] })) return;
+
   // ── 설교 후 자료 (인포그래픽 · 블로그 글 · 소그룹 나눔지) ──────────
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/after$/)) && req.method === 'GET') {
     const w = getWeek(sp, q[1]);

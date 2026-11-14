@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 
 export const uid = () => crypto.randomBytes(6).toString('hex');
 
-const empty = () => ({ version: 1, church: null, weeks: {}, songMeta: {} });
+const empty = () => ({ version: 1, church: null, weeks: {}, songMeta: {}, members: {}, visits: {}, attendance: {}, events: {}, minutes: {}, certs: {} });
 
 export function openStore(dataDir, ws) {
   fs.mkdirSync(path.join(dataDir, 'backups'), { recursive: true });

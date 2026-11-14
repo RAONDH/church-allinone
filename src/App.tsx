@@ -6,6 +6,9 @@ import Home from './pages/Home';
 import WeekPage from './pages/WeekPage';
 import Songs from './pages/Songs';
 import Guide from './pages/Guide';
+import People from './pages/People';
+import Finance from './pages/Finance';
+import Admin from './pages/Admin';
 
 interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () => Promise<void>; base: string; loadError: string }
 const C = createContext<Ctx>(null as any);
@@ -43,6 +46,9 @@ export default function App() {
         <NavLink to="/" className="brand">라온 교회 올인원{ov?.church ? <small>{ov.church.name}</small> : null}</NavLink>
         <nav>
           <NavLink to="/" end>이번 주 준비함</NavLink>
+          <NavLink to="/people">성도</NavLink>
+          <NavLink to="/finance">재정</NavLink>
+          <NavLink to="/admin">행정</NavLink>
           <NavLink to="/songs">찬양 자료</NavLink>
           <NavLink to="/apps">프로그램</NavLink>
           <NavLink to="/settings">설정</NavLink>
@@ -62,6 +68,12 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/week/:id" element={<WeekPage />} />
               <Route path="/week/:id/:tab" element={<WeekPage />} />
+              <Route path="/people" element={<People />} />
+              <Route path="/people/:tab" element={<People />} />
+              <Route path="/finance" element={<Finance />} />
+              <Route path="/finance/:tab" element={<Finance />} />
+              <Route path="/admin" element={<Admin />} />
+              <Route path="/admin/:tab" element={<Admin />} />
               <Route path="/songs" element={<Songs />} />
               <Route path="/apps" element={<Apps />} />
               <Route path="/settings" element={<Settings />} />
@@ -173,7 +185,8 @@ export function Settings() {
         <h2>연결과 저장 위치</h2>
         <ul className="plain">
           <li>예배송출 연결 주소: <code>{ov?.settings.wcUrl}</code> {ov?.wc.ok ? <span className="pill done">연결됨</span> : <span className="pill warn">연결 안 됨</span>}</li>
-          <li>라온 교회 올인원 자료: 이 컴퓨터의 <code>교회 올인원/data</code> 폴더 (매일 자동 백업, 14일 보관)</li>
+          <li>라온 교회 올인원 자료(성도 명부·재정 포함): 이 컴퓨터의 <code>교회 올인원/data</code> 폴더 (윈도우는 <code>%APPDATA%\ChurchAllInOne</code>) · 매일 자동 백업, 14일 보관</li>
+          <li>🔒 성도 명부·심방·출석·재정·행정 자료는 AI나 인터넷으로 보내지 않습니다. 이 컴퓨터를 다른 사람과 함께 쓰신다면 컴퓨터 로그인 암호를 걸어 두세요.</li>
           <li>찬양 가사·곡 구성·자막은 예배송출에 저장됩니다. 예배송출의 백업(zip)도 함께 챙겨 주세요.</li>
         </ul>
       </div>
