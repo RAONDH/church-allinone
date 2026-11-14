@@ -1,0 +1,80 @@
+[
+  {
+    "id": "caster",
+    "name": "예배송출 (자막·콘티)",
+    "desc": "예배당 TV·유튜브(OBS) 자막, 찬양 가사·곡 구성, 콘티",
+    "icon": "📺",
+    "color": "#1d4ed8",
+    "port": 5300,
+    "openPath": "/control",
+    "dir": "~/Applications",
+    "start": "open \"$HOME/Applications/예배송출.app\"",
+    "win": {
+      "dir": "{bundle}/apps/예배송출/app",
+      "run": [
+        "node",
+        "server.js"
+      ],
+      "env": {
+        "WC_DATA_DIR": "%APPDATA%\\WorshipCaster"
+      }
+    }
+  },
+  {
+    "id": "worship",
+    "name": "찬양곡 선정 (PraiseFlow)",
+    "desc": "설교 본문·제목으로 찬송가와 CCM 추천",
+    "icon": "🎵",
+    "color": "#4f46e5",
+    "port": 5173,
+    "dir": "~/Documents/praiseflow---예배-찬양-큐레이터",
+    "start": "node server.mjs",
+    "win": {
+      "dir": "{bundle}/apps/PraiseFlow",
+      "run": [
+        "node",
+        "server.mjs"
+      ]
+    }
+  },
+  {
+    "id": "shorts",
+    "name": "설교 쇼츠 제작",
+    "desc": "설교 영상을 쇼츠로 편집",
+    "icon": "🎬",
+    "color": "#c2410c",
+    "port": 3939,
+    "dir": "~/Applications/sermon-shorts-maker",
+    "start": "npm run start"
+  },
+  {
+    "id": "ledger",
+    "name": "회계장부",
+    "desc": "수입·지출 장부와 보고서",
+    "icon": "📒",
+    "color": "#0f766e",
+    "port": 5180,
+    "dir": "~/Applications/raon-church-ledger",
+    "start": "node node_modules/vite/bin/vite.js"
+  },
+  {
+    "id": "meditation",
+    "name": "주간묵상 생성기",
+    "desc": "설교문으로 7일 가정예배 묵상지 만들기",
+    "icon": "📖",
+    "color": "#7c3aed",
+    "port": 5175,
+    "dir": "~/Documents/주간묵상-생성기",
+    "start": "node server.mjs"
+  },
+  {
+    "id": "hwptopdf",
+    "name": "HWP/PDF 변환기",
+    "desc": "HWP·PDF를 마크다운으로 변환하고 PDF를 이미지로 저장",
+    "icon": "📄",
+    "color": "#0369a1",
+    "port": 5050,
+    "dir": "~/Applications/hwp-pdf-to-markdown",
+    "start": "./venv/bin/python3 start-silent.py --no-open"
+  }
+]

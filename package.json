@@ -1,0 +1,28 @@
+{
+  "name": "church-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "1인 목회자용 교회 운영 워크스페이스",
+  "scripts": {
+    "dev": "concurrently -k \"node server/index.mjs\" \"vite\"",
+    "build": "tsc --noEmit && vite build",
+    "start": "node server/index.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.6",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}
