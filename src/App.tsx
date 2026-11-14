@@ -40,7 +40,7 @@ export default function App() {
         </div>
       )}
       <header className="top">
-        <NavLink to="/" className="brand">교회 올인원{ov?.church ? <small>{ov.church.name}</small> : null}</NavLink>
+        <NavLink to="/" className="brand">라온 교회 올인원{ov?.church ? <small>{ov.church.name}</small> : null}</NavLink>
         <nav>
           <NavLink to="/" end>이번 주 준비함</NavLink>
           <NavLink to="/songs">찬양 자료</NavLink>
@@ -71,7 +71,7 @@ export default function App() {
           )}
       </main>
       <footer className="site-foot">
-        교회 올인원은 무료로 쓰실 수 있습니다. <NavLink to="/settings#support">후원 안내</NavLink>
+        라온 교회 올인원은 무료로 쓰실 수 있습니다. <NavLink to="/settings#support">후원 안내</NavLink> · <a href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">카카오 오픈채팅 문의</a>
       </footer>
     </C.Provider>
   );
@@ -88,7 +88,7 @@ function Setup() {
   return (
     <div className="setup">
       <h1>혼자 목회해도, 매주 준비를 혼자 다 하지 않도록.</h1>
-      <p className="lead">교회 올인원은 이미 쓰고 계신 예배송출(자막·콘티), 찬양곡 선정, 설교 쇼츠, 회계장부를 한 화면에 이어 줍니다.<br />
+      <p className="lead">라온 교회 올인원은 이미 쓰고 계신 예배송출(자막·콘티), 찬양곡 선정, 설교 쇼츠, 회계장부를 한 화면에 이어 줍니다.<br />
         예배 정보를 한 번 입력하면 예배송출 자막에도 그대로 들어갑니다.</p>
       <div className="setup-grid">
         <form className="card" onSubmit={submit}>
@@ -173,7 +173,7 @@ export function Settings() {
         <h2>연결과 저장 위치</h2>
         <ul className="plain">
           <li>예배송출 연결 주소: <code>{ov?.settings.wcUrl}</code> {ov?.wc.ok ? <span className="pill done">연결됨</span> : <span className="pill warn">연결 안 됨</span>}</li>
-          <li>교회 올인원 자료: 이 컴퓨터의 <code>교회 올인원/data</code> 폴더 (매일 자동 백업, 14일 보관)</li>
+          <li>라온 교회 올인원 자료: 이 컴퓨터의 <code>교회 올인원/data</code> 폴더 (매일 자동 백업, 14일 보관)</li>
           <li>찬양 가사·곡 구성·자막은 예배송출에 저장됩니다. 예배송출의 백업(zip)도 함께 챙겨 주세요.</li>
         </ul>
       </div>
@@ -215,7 +215,7 @@ function Support() {
   return (
     <div className="card support" id="support">
       <h2>후원 안내</h2>
-      <p>교회 올인원은 자율 후원으로 운영됩니다. 후원은 부담을 갖지 않으셔도 됩니다. 무료로 사용하셔도 괜찮습니다.</p>
+      <p>라온 교회 올인원은 자율 후원으로 운영됩니다. 후원은 부담을 갖지 않으셔도 됩니다. 무료로 사용하셔도 괜찮습니다.</p>
       <div className="account">
         <span>{ACCOUNT.bank}</span> <b>{ACCOUNT.number}</b> <span>{ACCOUNT.holder}</span>
         <button onClick={copy}>계좌번호 복사</button>

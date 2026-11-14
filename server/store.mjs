@@ -1,4 +1,4 @@
-// 교회 올인원 자료 저장: 작업 공간(real·sample)마다 JSON 파일 하나.
+// 라온 교회 올인원 자료 저장: 작업 공간(real·sample)마다 JSON 파일 하나.
 // 쓰기는 임시 파일 → 이름 바꾸기(중간에 꺼져도 파일이 깨지지 않음), 하루 한 번 자동 백업(14일 보관).
 import fs from 'node:fs';
 import path from 'node:path';

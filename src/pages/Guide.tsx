@@ -12,6 +12,7 @@ const TOC = [
   ['offline', '인터넷 없이 쓸 때'],
   ['install', '설치와 업데이트 (맥·윈도우)'],
   ['faq', '자주 묻는 질문'],
+  ['contact', '문의하기'],
 ] as const;
 
 // 화면 사진 (예제 자료로 찍음). 누르면 크게 보기
@@ -28,7 +29,7 @@ export default function Guide() {
   return (
     <section className="narrow guide">
       <h1>사용설명서</h1>
-      <p className="lead">교회 올인원은 1인 목회자를 위한 <b>이번 주 예배 준비 화면</b>입니다. 이미 쓰고 있는 예배송출(자막), PraiseFlow(찬양 추천), 설교 쇼츠, 회계장부를 새로 만들지 않고 한 화면에 이어 줍니다.</p>
+      <p className="lead">라온 교회 올인원은 1인 목회자를 위한 <b>이번 주 예배 준비 화면</b>입니다. 이미 쓰고 있는 예배송출(자막), PraiseFlow(찬양 추천), 설교 쇼츠, 회계장부를 새로 만들지 않고 한 화면에 이어 줍니다.</p>
 
       <nav className="card toc" aria-label="차례">
         <b>차례</b>
@@ -38,7 +39,7 @@ export default function Guide() {
       <div className="card" id="start">
         <h2>1. 처음 시작하기</h2>
         <ol>
-          <li>맥은 바탕화면의 <b>교회 올인원</b>, 윈도우는 <b>교회 올인원 실행.cmd</b>를 두 번 누르면 브라우저에 열립니다 (주소 <code>http://localhost:5191</code>).</li>
+          <li>맥은 바탕화면의 <b>라온 교회 올인원</b>, 윈도우는 <b>라온 교회 올인원 실행.cmd</b>를 두 번 누르면 브라우저에 열립니다 (주소 <code>http://localhost:5191</code>).</li>
           <li>첫 화면에서 교회 이름·목회자 이름·기본 예배 이름을 넣으면 시작합니다. 나중에 <Link to="/settings">설정</Link>에서 바꿀 수 있습니다.</li>
           <li>먼저 둘러보고 싶으면 오른쪽 위 <b>예제</b>를 누르세요. 예제에서 바꾼 것은 실제 교회 자료와 실제 예배송출에 아무 영향이 없습니다. <b>우리 교회</b>를 누르면 돌아옵니다.</li>
         </ol>
@@ -118,7 +119,7 @@ export default function Guide() {
 
       <div className="card" id="apps">
         <h2>7. 다른 프로그램</h2>
-        <p><Link to="/apps">프로그램</Link> 화면에서 예배송출, PraiseFlow, 설교 쇼츠 제작, 회계장부, 주간묵상 생성기, HWP 변환기를 켜고 엽니다. 필요할 때는 저절로 켜집니다. 회계 자료는 회계장부 프로그램 안에만 있고 교회 올인원은 열기만 합니다.</p>
+        <p><Link to="/apps">프로그램</Link> 화면에서 예배송출, PraiseFlow, 설교 쇼츠 제작, 회계장부, 주간묵상 생성기, HWP 변환기를 켜고 엽니다. 필요할 때는 저절로 켜집니다. 회계 자료는 회계장부 프로그램 안에만 있고 라온 교회 올인원은 열기만 합니다.</p>
         <p className="muted small">윈도우판에는 예배송출과 PraiseFlow가 들어 있습니다. 설교 쇼츠·회계장부·주간묵상·HWP 변환기는 아직 맥에서만 이어집니다.</p>
         <p>설교 영상 주소를 예배 정보 탭에 넣어 두면 결과물 탭에서 <b>주소 복사</b>로 쇼츠 제작에 바로 붙여 넣을 수 있습니다.</p>
       </div>
@@ -126,7 +127,7 @@ export default function Guide() {
       <div className="card" id="data">
         <h2>8. 자료 보관과 백업</h2>
         <ul>
-          <li>교회 올인원 자료는 맥은 <code>교회 올인원/data</code> 폴더, 윈도우는 <code>%APPDATA%\ChurchAllInOne</code> 폴더에 있고, 매일 자동 백업해 14일 보관합니다.</li>
+          <li>라온 교회 올인원 자료는 맥은 <code>교회 올인원/data</code> 폴더, 윈도우는 <code>%APPDATA%\ChurchAllInOne</code> 폴더에 있고, 매일 자동 백업해 14일 보관합니다.</li>
           <li>찬양 가사·곡 구성·자막은 예배송출에 저장됩니다. 예배송출의 백업(zip)도 함께 챙겨 주세요.</li>
           <li>예배 기록을 지워도 예배송출의 예배 순서는 지우지 않습니다.</li>
         </ul>
@@ -147,15 +148,15 @@ export default function Guide() {
         <h3>맥 (ChurchAllInOne-mac.zip)</h3>
         <ol>
           <li>압축을 풀고 <code>설치하기.command</code>를 <b>마우스 오른쪽 버튼 → 열기</b>로 실행합니다. 처음 한 번 "확인되지 않은 개발자" 경고가 뜨면 다시 <b>열기</b>를 누르세요.</li>
-          <li>몇 분 뒤 바탕화면에 <b>교회 올인원</b>이 생기고 열립니다. 관리자 암호는 필요 없고 인터넷은 필요합니다.</li>
+          <li>몇 분 뒤 바탕화면에 <b>라온 교회 올인원</b>이 생기고 열립니다. 관리자 암호는 필요 없고 인터넷은 필요합니다.</li>
           <li>업데이트: 새 묶음으로 다시 실행하면 프로그램만 새것으로 바뀌고 자료는 그대로입니다.</li>
         </ol>
         <h3>윈도우 10·11 (ChurchAllInOne-windows.zip)</h3>
         <ol>
-          <li>압축을 풀고 <b>교회 올인원</b> 폴더를 문서 등 원하는 곳에 둡니다. 압축 파일 안에서 바로 실행하지 마세요.</li>
-          <li><code>교회 올인원 실행.cmd</code>를 두 번 누릅니다. "Windows의 PC 보호" 창이 뜨면 <b>추가 정보 → 실행</b>을 누르세요. 설치 과정 없이 바로 열립니다.</li>
+          <li>압축을 풀고 <b>라온 교회 올인원</b> 폴더를 문서 등 원하는 곳에 둡니다. 압축 파일 안에서 바로 실행하지 마세요.</li>
+          <li><code>라온 교회 올인원 실행.cmd</code>를 두 번 누릅니다. "Windows의 PC 보호" 창이 뜨면 <b>추가 정보 → 실행</b>을 누르세요. 설치 과정 없이 바로 열립니다.</li>
           <li>작업 표시줄의 <b>ChurchAllInOne</b> 창이 프로그램 본체입니다. 닫으면 꺼집니다.</li>
-          <li>업데이트: <b>교회 올인원</b> 폴더만 새것으로 바꾸면 됩니다. 자료는 <code>%APPDATA%</code>에 따로 있어서 그대로 남습니다.</li>
+          <li>업데이트: <b>라온 교회 올인원</b> 폴더만 새것으로 바꾸면 됩니다. 자료는 <code>%APPDATA%</code>에 따로 있어서 그대로 남습니다.</li>
         </ol>
       </div>
 
@@ -163,7 +164,7 @@ export default function Guide() {
         <h2>11. 자주 묻는 질문</h2>
         <dl>
           <dt>예배송출 연결 안 됨이라고 나와요.</dt>
-          <dd>예배송출이 꺼져 있을 때입니다. <Link to="/apps">프로그램</Link>에서 예배송출을 열면 됩니다. 연결이 끊겨도 교회 올인원에 입력한 내용은 저장되고, 다시 연결되면 자막에 반영됩니다.</dd>
+          <dd>예배송출이 꺼져 있을 때입니다. <Link to="/apps">프로그램</Link>에서 예배송출을 열면 됩니다. 연결이 끊겨도 라온 교회 올인원에 입력한 내용은 저장되고, 다시 연결되면 자막에 반영됩니다.</dd>
           <dt>찬양 추천이나 설교 후 자료에서 "AI 연결 안 됨"이 나와요.</dt>
           <dd>이 컴퓨터에서 Claude Code나 Codex에 로그인되어 있지 않은 경우입니다. 6번을 보고 로그인한 뒤 <b>다시 확인</b>을 누르세요.</dd>
           <dt>"사용 한도에 걸렸습니다"가 나와요.</dt>
@@ -173,7 +174,13 @@ export default function Guide() {
         </dl>
       </div>
 
-      <p className="muted small">교회 올인원은 무료로 쓰실 수 있습니다. <Link to="/settings#support">후원 안내</Link></p>
+      <div className="card" id="contact">
+        <h2>12. 문의하기</h2>
+        <p>쓰시다가 안 되는 것이 있거나, 이런 기능이 있었으면 좋겠다는 생각이 드시면 언제든 알려 주세요.</p>
+        <p><a className="btn kakao" href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">💬 카카오 오픈채팅으로 문의하기</a></p>
+        <p className="muted small">회원 가입 없이 카카오톡으로 바로 이야기할 수 있습니다.</p>
+      </div>
+
     </section>
   );
 }

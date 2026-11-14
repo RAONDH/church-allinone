@@ -1,4 +1,4 @@
-// 교회 올인원 서버: 이번 주 준비함 + 기존 프로그램(예배송출·PraiseFlow·쇼츠·장부 등) 연결.
+// 라온 교회 올인원 서버: 이번 주 준비함 + 기존 프로그램(예배송출·PraiseFlow·쇼츠·장부 등) 연결.
 // 외부 인터넷 없이 이 컴퓨터 안에서만 동작한다 (PraiseFlow 찬양 추천만 그 프로그램이 인터넷을 씀).
 import http from 'node:http';
 import fs from 'node:fs';
@@ -111,7 +111,7 @@ async function ensureRunning(app) {
   const log = fs.openSync(path.join(LOG_DIR, `${app.id}.log`), 'a');
   for (const v of Object.values(app.env)) if (/[\\/]/.test(v)) fs.mkdirSync(v, { recursive: true });   // 자료 폴더 미리 만들기
   const env = { ...process.env, BROWSER: 'none', ...app.env };
-  // "run": ["node", "server.js"] 형식이면 쉘 없이 바로 실행 ("node"는 교회 올인원이 쓰는 Node 그대로)
+  // "run": ["node", "server.js"] 형식이면 쉘 없이 바로 실행 ("node"는 라온 교회 올인원이 쓰는 Node 그대로)
   const child = Array.isArray(app.run)
     ? spawn(app.run[0] === 'node' ? process.execPath : app.run[0], app.run.slice(1), { cwd: app.dir, detached: true, stdio: ['ignore', log, log], env, windowsHide: true })
     : spawn('/bin/zsh', ['-lc', app.start], { cwd: app.dir, detached: true, stdio: ['ignore', log, log], env });
@@ -205,7 +205,7 @@ async function api(req, res, url) {
     if (req.method === 'PUT') {
       const b = await body(req);
       Object.assign(w, cleanWeek(b), { updatedAt: Date.now() });
-      await sp.store.save();   // 교회 올인원 저장은 예배송출 연결과 상관없이 먼저 끝낸다
+      await sp.store.save();   // 라온 교회 올인원 저장은 예배송출 연결과 상관없이 먼저 끝낸다
       const sync = await wcTry(() => applyWeek(sp.wc(), w));
       return send(res, 200, { week: w, sync });
     }
@@ -328,7 +328,7 @@ async function api(req, res, url) {
     return send(res, 200, { ok: true, url: sp.wc().kind === 'http' ? `${sp.wc().base.replace('127.0.0.1', 'localhost')}/control` : null });
   }
 
-  // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 교회 올인원)
+  // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 라온 교회 올인원)
   if (sub === '/songs' && req.method === 'GET') {
     const r2 = await wcTry(async () => {
       const st = await sp.wc().state();
@@ -459,7 +459,7 @@ async function api(req, res, url) {
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
     if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="${w.date}-${def.file}.${ext}"; filename*=UTF-8''${encodeURIComponent(`${w.date} ${w.sermonTitle || ''} ${def.label}.${ext}`.replace(/[\\/:*?"<>|]/g, ''))}`;
     if (ext === 'html') {
-      // AI가 만든 페이지는 따로 떨어진 상자(sandbox)에서만 열어 교회 올인원 자료에 손대지 못하게 한다
+      // AI가 만든 페이지는 따로 떨어진 상자(sandbox)에서만 열어 라온 교회 올인원 자료에 손대지 못하게 한다
       headers['Content-Type'] = 'text/html; charset=utf-8';
       headers['Content-Security-Policy'] = "sandbox allow-scripts allow-modals allow-popups; default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src data:; script-src 'unsafe-inline'";
     } else headers['Content-Type'] = 'text/plain; charset=utf-8';
@@ -494,4 +494,4 @@ http.createServer(async (req, res) => {
     if (!(e instanceof HttpError)) console.error(e);
     send(res, e instanceof HttpError ? e.code : 500, { error: e.message || '알 수 없는 오류' });
   }
-}).listen(PORT, '127.0.0.1', () => console.log(`교회 올인원: http://localhost:${PORT}  (예배송출 연결: ${spaces.real.wc().base})`));
+}).listen(PORT, '127.0.0.1', () => console.log(`라온 교회 올인원: http://localhost:${PORT}  (예배송출 연결: ${spaces.real.wc().base})`));

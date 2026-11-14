@@ -1,4 +1,4 @@
-/* 교회 올인원 — 외부 글꼴·CDN 없이 시스템 글꼴만 사용 (인터넷 없이도 같은 모양) */
+/* 라온 교회 올인원 — 외부 글꼴·CDN 없이 시스템 글꼴만 사용 (인터넷 없이도 같은 모양) */
 :root {
   --bg: #f6f5f2; --card: #fff; --ink: #1f2328; --muted: #6b6f76; --line: #e3e1dc;
   --accent: #2f5d50; --accent-ink: #fff; --done: #1f7a4d; --done-bg: #e3f3ea; --todo: #8a5a00; --todo-bg: #fdf1d8;
@@ -200,3 +200,4 @@ a.btn:hover { border-color: var(--accent); }
 .guide .shot-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .guide .shot-pair img { max-height: 520px; object-fit: cover; object-position: top; }
 @media (max-width: 600px) { .guide .shot-pair { grid-template-columns: 1fr; } }
+a.btn.kakao { background: #fee500; border-color: #fee500; color: #191919; font-weight: 600; }

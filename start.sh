@@ -1,5 +1,5 @@
 #!/bin/bash
-# 교회 올인원 시작 (터미널 없이 실행 가능). 이미 켜져 있으면 브라우저만 엽니다.
+# 라온 교회 올인원 시작 (터미널 없이 실행 가능). 이미 켜져 있으면 브라우저만 엽니다.
 export PATH="$HOME/.local/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT="${PORT:-5191}"

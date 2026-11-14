@@ -93,7 +93,7 @@ export default function WeekPage() {
       </div>
       {save.restored && <div className="alert info">저장되지 못했던 입력 내용을 되살렸습니다. 곧 자동으로 저장됩니다.</div>}
       {save.state === 'error' && <div className="alert err"><b>저장하지 못했습니다.</b> {save.msg} 입력한 내용은 이 브라우저에 임시로 보관 중이며, 5초마다 다시 저장을 시도합니다. <button onClick={doSave}>지금 다시 저장</button></div>}
-      {save.sync && !save.sync.ok && <div className="alert warn">교회 올인원에는 저장했지만 예배송출에 반영하지 못했습니다: {save.sync.error} 예배송출이 켜지면 다음 저장 때 자동으로 반영됩니다.</div>}
+      {save.sync && !save.sync.ok && <div className="alert warn">라온 교회 올인원에는 저장했지만 예배송출에 반영하지 못했습니다: {save.sync.error} 예배송출이 켜지면 다음 저장 때 자동으로 반영됩니다.</div>}
       <nav className="tabs">
         {TABS.map(([k, label]) => {
           const st = steps.find((s) => s.tab === k && (s.level === 'todo' || s.level === 'warn'));
@@ -460,7 +460,7 @@ function SubsTab({ week, status, setStatus, replaceWeek }: { week: Week; status:
       <div className="col">
         <div className="card">
           <h2>확정본</h2>
-          {f.state === 'none' && <p>아직 확정하지 않았습니다. 준비가 끝나면 확정해 두세요. 확정본은 교회 올인원에 따로 보관되어, 나중에 곡 조성이나 자막을 바꿔도 이 예배 내용은 그대로 남습니다.</p>}
+          {f.state === 'none' && <p>아직 확정하지 않았습니다. 준비가 끝나면 확정해 두세요. 확정본은 라온 교회 올인원에 따로 보관되어, 나중에 곡 조성이나 자막을 바꿔도 이 예배 내용은 그대로 남습니다.</p>}
           {f.state === 'same' && <p className="ok-text">✓ {fmtTime(f.at!)}에 확정한 내용과 지금 예배송출 내용이 같습니다.</p>}
           {f.state === 'changed' && (
             <div className="alert warn">

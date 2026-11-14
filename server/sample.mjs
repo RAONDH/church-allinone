@@ -24,7 +24,7 @@ const song = (title, key, lyrics, extra = {}) => {
 export function sampleWcSeed() {
   const s1 = song('[예제] 아침의 노래', 'G', `#1절\n새 아침 주신 주님께\n감사의 노래 드리네\n어제의 짐을 내려놓고\n오늘을 주께 맡기네\n\n#후렴\n주님 함께 걸으면\n두려움 없네\n주님 함께 걸으면\n평안이 있네\n\n#2절\n작은 일 하나하나도\n주님의 손에 있으니\n서두르지 않아도 되네\n주께서 길을 여시네`, { arr: ['1절', '후렴', '2절', '후렴'], memo: '후렴 두 번째는 조용히' });
   const s2 = song('[예제] 은혜의 강', 'D', `#1절\n은혜의 강이 흐르네\n메마른 땅을 적시네\n\n#후렴\n흘러라 흘러라\n주의 은혜여`, { arr: ['1절', '후렴', '후렴'] });
-  // 같은 제목, 다른 곡 (구분 정보는 교회 올인원의 찬양 자료에 기록)
+  // 같은 제목, 다른 곡 (구분 정보는 라온 교회 올인원의 찬양 자료에 기록)
   const s3a = song('[예제] 주님만 바라봅니다', 'A', `#1절\n세상 소리 멀어지고\n주님만 바라봅니다\n\n#후렴\n나의 소망 나의 기쁨\n주님만 바라봅니다`, { arr: ['1절', '후렴'] });
   const s3b = song('[예제] 주님만 바라봅니다', 'E', `#1절\n고요한 밤 기도하며\n주님만 바라봅니다\n\n#후렴\n주의 얼굴 구하오니\n나를 만나 주옵소서`, { arr: ['1절', '후렴'] });
   const s4 = song('[예제] 보내심의 노래', 'C', `#1절\n이제 세상 속으로\n주님과 함께 갑니다\n\n#후렴\n나를 보내소서\n주님 뜻 이루도록`, { arr: ['1절', '후렴'] });
@@ -47,7 +47,7 @@ export function sampleWcSeed() {
   };
 }
 
-// 교회 올인원 쪽 예제 자료 (지난주 예배 기록 1개). 예배송출 예배 순서와 연결해 둔다.
+// 라온 교회 올인원 쪽 예제 자료 (지난주 예배 기록 1개). 예배송출 예배 순서와 연결해 둔다.
 export function sampleHubSeed(wcState) {
   const svc = wcState.services[0];
   const find = (re) => wcState.items.find((i) => svc.itemIds.includes(i.id) && re.test(i.slides[0]?.text || ''))?.id || null;
