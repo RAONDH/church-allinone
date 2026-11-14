@@ -193,3 +193,10 @@ a.btn:hover { border-color: var(--accent); }
 .guide dt { font-weight: 700; margin-top: 12px; }
 .guide dd { margin: 4px 0 0; line-height: 1.65; }
 @media (max-width: 600px) { .guide .toc ol { columns: 1; } .guide-table th { white-space: normal; width: 30%; } }
+.guide figure.shot { margin: 14px 0 6px; }
+.guide figure.shot img { width: 100%; display: block; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.08); }
+.guide figure.shot figcaption { color: var(--muted); font-size: .85rem; margin-top: 6px; text-align: center; }
+.guide h3 { margin: 16px 0 4px; font-size: 1.02rem; }
+.guide .shot-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.guide .shot-pair img { max-height: 520px; object-fit: cover; object-position: top; }
+@media (max-width: 600px) { .guide .shot-pair { grid-template-columns: 1fr; } }

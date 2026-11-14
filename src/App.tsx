@@ -11,7 +11,12 @@ interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () 
 const C = createContext<Ctx>(null as any);
 export const useApp = () => useContext(C);
 
-const readWs = (): Ws => { try { return localStorage.getItem('ws') === 'sample' ? 'sample' : 'real'; } catch { return 'real'; } };
+// 주소에 ?ws=sample 을 붙이면 예제로 바로 열기 (설명서·소개 사진용 링크)
+const readWs = (): Ws => {
+  const q = new URLSearchParams(window.location.search).get('ws');
+  if (q === 'sample' || q === 'real') { try { localStorage.setItem('ws', q); } catch { /* 저장 안 돼도 동작 */ } return q; }
+  try { return localStorage.getItem('ws') === 'sample' ? 'sample' : 'real'; } catch { return 'real'; }
+};
 
 export default function App() {
   const [ws, setWsState] = useState<Ws>(readWs);

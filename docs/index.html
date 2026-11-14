@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>교회 올인원 — 1인 목회자를 위한 이번 주 예배 준비</title>
+<meta name="description" content="본문과 설교 제목을 한 번만 넣으면 예배 자막, 찬양 콘티, 설교 인포그래픽, 블로그 글, 소그룹 나눔지까지. 맥·윈도우 무료 프로그램.">
+<meta property="og:title" content="교회 올인원 — 혼자 목회해도, 매주 준비를 혼자 다 하지 않도록">
+<meta property="og:description" content="한 번 입력하면 예배 자막·찬양 콘티·설교 인포그래픽·블로그 글·소그룹 나눔지까지. 맥·윈도우 무료.">
+<meta property="og:image" content="https://raon-easypaster.github.io/church-allinone/img/01-home.jpg">
+<meta property="og:type" content="website">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1f2328; --muted: #62666d; --line: #e3e1dc;
+    --brand: #2f5d50; --brand2: #3c7564; --gold: #c99a14; --soft: #ebf1ee; --shadow: rgba(30, 50, 40, .18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #131715; --panel: #1b201e; --text: #e9ece9; --muted: #a3aaa6; --line: #2c3430; --brand: #8fc7b3; --brand2: #6fb39c; --gold: #e6b422; --soft: #1f2a26; --shadow: rgba(0, 0, 0, .5); }
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.7 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; word-break: keep-all; }
+  a { color: var(--brand2); }
+  img { max-width: 100%; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 18px 0; }
+  header.top img { width: 34px; height: 34px; }
+  header.top b { font-size: 18px; }
+  header.top .grow { flex: 1; }
+  header.top a { font-size: 14px; color: var(--muted); text-decoration: none; margin-left: 14px; }
+
+  .hero { padding: 30px 0 18px; text-align: center; }
+  .hero .tag { display: inline-block; font-size: 14px; color: var(--brand); background: var(--soft); border-radius: 99px; padding: 4px 14px; margin-bottom: 14px; font-weight: 500; }
+  .hero h1 { font-size: clamp(28px, 5.4vw, 46px); line-height: 1.3; margin: 0 0 14px; font-weight: 900; letter-spacing: -0.02em; }
+  .hero h1 em { font-style: normal; color: var(--brand2); }
+  .nw { display: inline-block; }
+  .hero p.lead { font-size: clamp(16px, 2.3vw, 19px); color: var(--muted); margin: 0 auto 26px; max-width: 660px; }
+  .dl { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 230px; padding: 14px 22px; border-radius: 14px; text-decoration: none; font-weight: 700; font-size: 18px; border: 2px solid var(--brand); color: var(--brand); background: var(--panel); transition: transform .1s; }
+  .btn small { font-weight: 400; font-size: 13px; opacity: .85; }
+  .btn.main { background: var(--brand); color: #fff; }
+  @media (prefers-color-scheme: dark) { .btn.main { color: #10201a; } }
+  .btn:active { transform: scale(.98); }
+  .ver { margin-top: 12px; color: var(--muted); font-size: 14px; }
+  .mobile-note { display: none; margin: 14px auto 0; max-width: 520px; background: var(--soft); border-radius: 12px; padding: 12px 16px; font-size: 15px; }
+
+  .shot { margin: 34px auto 0; max-width: 980px; }
+  .shot img { width: 100%; display: block; border-radius: 12px; box-shadow: 0 10px 40px var(--shadow); }
+  .cap { text-align: center; color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+  section { padding: 60px 0 0; }
+  h2 { font-size: clamp(22px, 3.6vw, 30px); margin: 0 0 8px; font-weight: 900; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .twoc { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .card img { width: 100%; border-radius: 8px; display: block; margin-bottom: 12px; border: 1px solid var(--line); }
+  .card img.tall { height: 300px; object-fit: cover; object-position: top; }
+  .card h3 { margin: 0 0 4px; font-size: 18px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .flow { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; margin: 0 0 26px; }
+  .flow span { background: var(--panel); border: 1px solid var(--line); border-radius: 99px; padding: 6px 14px; font-weight: 500; font-size: 15px; }
+  .flow i { font-style: normal; color: var(--muted); }
+  .flow .first { background: var(--brand); color: #fff; border-color: var(--brand); }
+  @media (prefers-color-scheme: dark) { .flow .first { color: #10201a; } }
+  .feat { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 22px; padding: 0; margin: 0; list-style: none; }
+  .feat li { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .feat b { display: block; }
+  .feat span { color: var(--muted); font-size: 15px; }
+  .two { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; align-items: center; }
+  .two img { width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+  .need { background: var(--soft); border-radius: 14px; padding: 16px 20px; }
+  .need ul { margin: 6px 0 0; padding-left: 20px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; color: var(--gold); border: 1px solid var(--gold); border-radius: 6px; padding: 0 6px; margin-left: 6px; vertical-align: 2px; }
+  .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .steps ol { margin: 8px 0 0; padding-left: 20px; }
+  .steps li { margin: 6px 0; }
+  .support { text-align: center; padding: 22px 18px; }
+  .support h3 { margin: 0 0 6px; font-size: 19px; }
+  .support p { margin: 0 0 14px; color: var(--muted); }
+  .acct { display: inline-flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: center; background: var(--soft); border-radius: 12px; padding: 10px 16px; }
+  .acct b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .acct button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+
+  footer { margin: 60px 0 0; padding: 26px 0 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; text-align: center; }
+  footer p { margin: 4px 0; }
+  footer .org { margin-top: 14px; font-weight: 700; color: var(--text); letter-spacing: .02em; }
+
+  @media (max-width: 760px) {
+    .three, .twoc, .feat, .two, .steps { grid-template-columns: 1fr; }
+    header.top a.hide-m { display: none; }
+    .btn { min-width: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="img/icon.svg" alt="">
+    <b>교회 올인원</b>
+    <span class="grow"></span>
+    <a href="#features" class="hide-m">할 수 있는 것</a>
+    <a href="#after" class="hide-m">설교 후 자료</a>
+    <a href="#install">설치 방법</a>
+  </header>
+
+  <div class="hero">
+    <div class="tag">1인 목회자를 위한 이번 주 준비함</div>
+    <h1>혼자 목회해도,<br><em><span class="nw">매주 준비를</span> <span class="nw">혼자 다 하지 않도록</span></em></h1>
+    <p class="lead">본문과 설교 제목을 <b>한 번만</b> 넣으면 예배 자막, 찬양 콘티, 설교 인포그래픽, 블로그 글, 소그룹 나눔지까지 이어집니다. 작은 교회를 위해 만든 <b>무료</b> 프로그램입니다.</p>
+    <div class="dl" id="dl">
+      <a class="btn main" id="btnMac" href="https://github.com/raon-easypaster/church-allinone/releases/latest/download/ChurchAllInOne-mac.zip">맥용 받기<small>애플 칩 · 인텔 맥</small></a>
+      <a class="btn" id="btnWin" href="https://github.com/raon-easypaster/church-allinone/releases/latest/download/ChurchAllInOne-windows.zip">윈도우용 받기<small>윈도우 10 · 11 (64비트)</small></a>
+    </div>
+    <div class="ver" id="ver">최신 버전 · 회원 가입 없이 무료 · 베타</div>
+    <div class="mobile-note" id="mobileNote">📱 휴대폰에서는 설치할 수 없습니다. 교회 <b>노트북(맥·윈도우)</b>에서 이 페이지를 열어 받으세요.
+      <br><button id="copyLink" style="margin-top:8px;font:inherit;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--text)">이 페이지 주소 복사</button></div>
+  </div>
+
+  <div class="shot">
+    <img src="img/01-home.jpg" alt="교회 올인원 이번 주 준비함 화면 — 예배 정보, 찬양 콘티, 자막, 설교 자료의 준비 상태와 다음으로 할 일">
+    <div class="cap">이번 주 준비함 — 무엇이 끝났고 무엇이 남았는지 한눈에 (예제 자료 화면)</div>
+  </div>
+
+  <section>
+    <h2>한 번 입력하면, 이어집니다</h2>
+    <p class="sub">같은 본문과 제목을 다섯 군데에 따로 적지 않아도 됩니다.</p>
+    <div class="flow"><span class="first">예배 정보</span><i>→</i><span>찬양 콘티</span><i>→</i><span>자막 확정</span><i>→</i><span>결과물</span><i>→</i><span>설교 후 자료</span></div>
+    <div class="three">
+      <div class="card"><img src="img/02-info.jpg" alt="예배 정보 입력 화면" class="tall"><h3>📝 예배 정보</h3><p>본문·설교 제목·대표 기도·광고를 쓰면 <a href="https://github.com/raon-easypaster/worship-caster">예배송출</a> 자막에 저절로 들어갑니다.</p></div>
+      <div class="card"><img src="img/03-setlist.jpg" alt="찬양 콘티 화면" class="tall"><h3>🎵 찬양 콘티</h3><p>곡을 넣고 순서·조성·곡 구성(1절 → 후렴)을 정합니다. 카톡용 콘티 글 복사와 인쇄도 됩니다.</p></div>
+      <div class="card"><img src="img/04-subs.jpg" alt="자막 확정 화면" class="tall"><h3>📺 자막 확정</h3><p>예배 직전 모습을 그대로 보관합니다. 나중에 곡이 바뀌어도 그 주 예배는 남고, 되돌릴 수 있습니다.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="two">
+      <img src="img/03b-recommend.jpg" alt="찬양 추천 결과 — 추천 이유, 분위기, 콘티에 넣기 버튼">
+      <div>
+        <h2>찬양 추천까지</h2>
+        <p class="sub">함께 들어 있는 <b>PraiseFlow 찬양 큐레이터</b>가 본문과 설교 제목을 읽고 찬송가와 CCM을 추천합니다.</p>
+        <div class="need"><ul>
+          <li>곡마다 추천 이유·분위기·유튜브·악보 링크</li>
+          <li>찬양 자료에 있는 곡은 <b>콘티에 넣기</b> 한 번</li>
+          <li>없는 곡은 새 곡으로 만들어 넣기 (가사는 예배송출에서)</li>
+        </ul></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="after">
+    <h2>설교가 끝난 뒤에도</h2>
+    <p class="sub">설교 원고 하나로 성도와 나눌 자료를 만듭니다. 아래는 <b>예시 원고</b>로 실제로 만든 결과입니다.</p>
+    <div class="three">
+      <div class="card"><img src="img/ex-infographic.jpg" alt="AI가 만든 설교 인포그래픽 예시" class="tall"><h3>🖼 설교 인포그래픽</h3><p>대지·중심 말씀·핵심 단어·적용 체크리스트·기도문을 한 장의 웹페이지로. 링크나 파일로 나눕니다.</p></div>
+      <div class="card"><img src="img/ex-sg-adult.jpg" alt="AI가 만든 장년 소그룹 나눔지 예시" class="tall"><h3>👥 소그룹 나눔지</h3><p>장년(90분)·청소년(75분) 두 가지. 질문, 중보기도 표, 접히는 인도자 가이드. 인쇄하면 A4로.</p></div>
+      <div class="card"><img src="img/06-after.jpg" alt="설교 후 자료 탭" class="tall"><h3>✍️ 블로그 글</h3><p>강단 말투를 읽는 글로 다듬어 줍니다. <b>글 복사</b>로 네이버 블로그·티스토리에 붙여 넣으면 끝.</p></div>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>할 수 있는 것</h2>
+    <p class="sub">이미 쓰고 계신 프로그램을 새로 만들지 않고 한 화면에 이어 줍니다.</p>
+    <ul class="feat">
+      <li><b>📋 이번 주 준비함</b><span>할 일이 순서대로, '준비 이어하기' 한 번이면 남은 곳으로</span></li>
+      <li><b>🔁 지난주 예배 복사</b><span>예배 순서와 광고를 이어받아 시작</span></li>
+      <li><b>📺 예배송출 자막 연결</b><span>성경 봉독·말씀 선포·교회 소식·대표 기도 자막에 자동 반영</span></li>
+      <li><b>🎵 찬양 콘티·추천</b><span>조성·곡 구성·흐름 메모, AI 찬양 추천, 카톡용 글 복사·인쇄</span></li>
+      <li><b>🗂 자막 확정본</b><span>그 주 예배 모습 보관, 바뀐 곳 알림, 되돌리기</span></li>
+      <li><b>🖼 설교 후 자료</b><span>설교 인포그래픽, 블로그 글, 소그룹 나눔지(장년·청소년)</span></li>
+      <li><b>👀 예제로 먼저 둘러보기</b><span>예제에서 바꾼 것은 실제 교회 자료에 영향 없음</span></li>
+      <li><b>💾 자동 백업</b><span>매일 자동 백업, 14일 보관. 자료는 이 컴퓨터 안에만</span></li>
+      <li><b>📘 사용설명서</b><span>프로그램 안에 화면 사진과 함께</span></li>
+      <li><b>🔒 인터넷 없어도</b><span>준비·콘티·자막 확정은 인터넷 없이 (AI 기능만 인터넷 필요)</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="two">
+      <img src="img/07-guide.jpg" alt="프로그램 안의 사용설명서">
+      <div>
+        <h2>AI는 API 키 없이<span class="badge">추가 요금 없음</span></h2>
+        <p class="sub">찬양 추천과 설교 후 자료는 이미 쓰고 계신 <b>Claude</b>나 <b>ChatGPT</b> 구독으로 만듭니다.</p>
+        <div class="need"><ul>
+          <li><b>Claude 구독</b>: Claude Code를 설치하고 로그인</li>
+          <li><b>ChatGPT 구독</b>: Codex를 설치하고 로그인</li>
+          <li>찬양 추천은 Gemini API 키로도 됩니다</li>
+        </ul></div>
+        <p class="sub" style="margin-top:14px">AI 없이도 예배 정보·콘티·자막 확정은 그대로 쓸 수 있습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <h2>설치 방법</h2>
+    <p class="sub">처음 한 번만 경고 창이 나옵니다. 유료 인증을 받지 않은 무료 프로그램이라 나오는 안내입니다. <a href="https://github.com/raon-easypaster/worship-caster">예배송출</a>과 PraiseFlow가 함께 들어 있습니다.</p>
+    <div class="steps">
+      <div class="card"><h3>🍎 맥</h3><ol>
+        <li>위의 <b>맥용 받기</b>를 누르고, 받은 zip 파일을 두 번 눌러 압축을 풉니다.</li>
+        <li><b>설치하기.command</b>를 <b>마우스 오른쪽 버튼 → 열기</b>로 실행합니다.</li>
+        <li>"확인되지 않은 개발자" 창이 뜨면 다시 <b>[열기]</b>.</li>
+        <li>몇 분 뒤 바탕화면에 <b>교회 올인원</b>이 생기고 열립니다. (인터넷 필요, 관리자 암호 불필요)</li>
+      </ol></div>
+      <div class="card"><h3>🪟 윈도우</h3><ol>
+        <li>위의 <b>윈도우용 받기</b>를 누르고, 받은 zip 파일을 오른쪽 클릭 → <b>모두 압축 풀기</b>.</li>
+        <li>'교회 올인원' 폴더를 문서 폴더 같은 곳에 둡니다.</li>
+        <li><b>교회 올인원 실행.cmd</b>를 두 번 누릅니다. 설치 과정 없이 바로 열립니다.</li>
+        <li>"Windows의 PC 보호" 창이 뜨면 <b>[추가 정보] → [실행]</b>.</li>
+      </ol></div>
+    </div>
+    <p class="sub" style="margin-top:16px">새 버전은 같은 방법으로 받아 바꾸면 됩니다. 입력한 교회 자료는 그대로 남습니다.</p>
+  </section>
+
+  <section>
+    <h2>알아 두실 점</h2>
+    <div class="steps">
+      <div class="card"><h3>🤖 AI가 만든 자료는 한 번 읽어 주세요</h3>
+        <p>원고에 없는 구절이나 예화는 쓰지 않도록 했지만, 성경 구절·인용이 원고와 같은지 나누기 전에 꼭 확인해 주세요. 찬양 추천도 실제 곡인지 유튜브·악보로 확인한 뒤 넣어 주세요.</p></div>
+      <div class="card"><h3>🙏 첫 공개(베타)입니다</h3>
+        <p>쓰시다가 안 되는 것이 있거나 바라는 기능이 있으면 알려 주세요. 작은 교회에서 실제로 쓰시는 이야기가 가장 큰 도움이 됩니다.</p>
+        <p style="margin-top:10px"><a href="https://github.com/raon-easypaster/church-allinone/issues">GitHub 의견 게시판에 남기기 →</a></p></div>
+    </div>
+  </section>
+
+  <section id="support">
+    <div class="card support">
+      <h3>🤝 교회 올인원은 자율 후원으로 운영됩니다</h3>
+      <p>후원은 부담을 갖지 않으셔도 됩니다. 무료로 사용하셔도 괜찮습니다.</p>
+      <div class="acct">
+        <span>카카오뱅크 <b>3333-01-9034483</b> 이광복</span>
+        <button type="button" id="copyAcct">계좌번호 복사</button>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>만든 사람: <b>쉬운목사 이광복</b> · 무료로 나눕니다</p>
+    <p>화면 사진은 모두 예제 자료입니다. 찬양 가사와 성경 번역본은 저작권이 있으니 교회의 이용 허락 범위 안에서 쓰세요.</p>
+    <p><a href="https://github.com/raon-easypaster/church-allinone/releases">지난 버전·바뀐 내용</a> · <a href="https://github.com/raon-easypaster/church-allinone/issues">GitHub 의견 게시판</a> · <a href="https://github.com/raon-easypaster/church-allinone">소스 코드</a> · <a href="https://raon-easypaster.github.io/worship-caster/">예배송출</a></p>
+    <p class="org">한국AI목회연구소</p>
+  </footer>
+</div>
+
+<script>
+  // 들어온 컴퓨터에 맞는 단추를 앞에, 휴대폰이면 안내
+  (function () {
+    const ua = navigator.userAgent || '';
+    const plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const win = /Win/i.test(plat) || /Windows/i.test(ua);
+    const $ = (id) => document.getElementById(id);
+    if (win) { $('btnWin').classList.add('main'); $('btnMac').classList.remove('main'); $('dl').prepend($('btnWin')); }
+    if (mobile) {
+      $('mobileNote').style.display = 'block';
+      $('copyLink').onclick = () => navigator.clipboard?.writeText(location.href.split('#')[0]).then(() => ($('copyLink').textContent = '복사했습니다 — 카톡으로 보내 두세요'));
+    }
+  })();
+
+  // 후원 계좌번호 복사 (숫자만)
+  document.getElementById('copyAcct').onclick = (e) => {
+    const no = '3333019034483';
+    (navigator.clipboard ? navigator.clipboard.writeText(no) : Promise.reject()).then(() => (e.target.textContent = '복사했습니다'), () => prompt('계좌번호', no));
+  };
+
+  // 최신 버전 정보 — 실패해도 위 고정 링크는 그대로 동작
+  fetch('https://api.github.com/repos/raon-easypaster/church-allinone/releases/latest')
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((rel) => {
+      const mb = (n) => Math.round(n / 1048576) + 'MB';
+      const find = (re) => (rel.assets || []).find((a) => re.test(a.name));
+      const m = find(/mac\.zip$/i), w = find(/windows\.zip$/i);
+      if (m) document.querySelector('#btnMac small').textContent = `애플 칩 · 인텔 맥 · ${mb(m.size)}`;
+      if (w) document.querySelector('#btnWin small').textContent = `윈도우 10 · 11 · ${mb(w.size)}`;
+      const d = (rel.published_at || '').slice(0, 10);
+      document.getElementById('ver').textContent = `최신 ${rel.tag_name}${d ? ' · ' + d : ''} · 회원 가입 없이 무료 · 베타`;
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

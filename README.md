@@ -6,7 +6,9 @@
 
 ## 받기
 
-**[최신 릴리스에서 받기 →](https://github.com/raon-easypaster/church-allinone/releases/latest)**
+**[소개·받는 곳 → raon-easypaster.github.io/church-allinone](https://raon-easypaster.github.io/church-allinone/)** · [최신 릴리스](https://github.com/raon-easypaster/church-allinone/releases/latest)
+
+![이번 주 준비함 화면 (예제 자료)](docs/img/01-home.jpg)
 
 | 파일 | 내용 |
 |---|---|
@@ -31,6 +33,9 @@
 | 회계 | **회계장부** (5180) | 열기 (장부 자료는 그 프로그램 안에만 있음) |
 | 기타 | 주간묵상 생성기, HWP/PDF 변환기 | 열기 |
 
+## 소개 페이지
+`docs/` 폴더가 GitHub Pages(https://raon-easypaster.github.io/church-allinone/)로 공개됩니다. 화면 사진은 모두 예제 자료(`?ws=sample`로 열기)로 찍었습니다.
+
 ## 설치 묶음 만들기 (개발자용)
 - 맥: `installer/make-package.sh` → 바탕화면에 `교회올인원-설치-날짜.zip`
   - 교회 올인원 + 예배송출.app + PraiseFlow. 교회 자료(`data`), API 키(`.env.local`), `node_modules`, 백업 폴더는 넣지 않습니다.
@@ -42,7 +47,7 @@
 - 설교 쇼츠·회계장부·주간묵상·HWP 변환기는 묶음에 없습니다(자료가 프로그램 폴더 안에 있어서). 맥에서 따로 설치하면 '프로그램' 화면에 나타납니다.
 
 ## 사용설명서
-프로그램 위 메뉴 **사용설명서**(`/guide`)에 처음 시작·매주 준비 순서·설교 후 자료·AI 구독 연결·백업·설치·자주 묻는 질문을 정리했습니다. 교회 정보를 넣기 전에도 볼 수 있습니다.
+프로그램 위 메뉴 **사용설명서**(`/guide`, 화면 사진 포함 · 사진은 `public/guide/`)에 처음 시작·매주 준비 순서·설교 후 자료·AI 구독 연결·백업·설치·자주 묻는 질문을 정리했습니다. 교회 정보를 넣기 전에도 볼 수 있습니다.
 
 ## 실행
 `교회 올인원 열기.command` 를 두 번 누르거나:

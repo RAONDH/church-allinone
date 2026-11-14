@@ -14,6 +14,16 @@ const TOC = [
   ['faq', '자주 묻는 질문'],
 ] as const;
 
+// 화면 사진 (예제 자료로 찍음). 누르면 크게 보기
+function Shot({ src, cap }: { src: string; cap: string }) {
+  return (
+    <figure className="shot">
+      <a href={`/guide/${src}`} target="_blank" rel="noopener"><img src={`/guide/${src}`} alt={cap} loading="lazy" /></a>
+      <figcaption>{cap}</figcaption>
+    </figure>
+  );
+}
+
 export default function Guide() {
   return (
     <section className="narrow guide">
@@ -37,6 +47,7 @@ export default function Guide() {
       <div className="card" id="week">
         <h2>2. 매주 준비 순서</h2>
         <p><Link to="/">이번 주 준비함</Link>에서 <b>이번 주 예배 만들기</b>를 누르거나, <b>지난주 예배 복사</b>로 지난주 순서·광고를 이어받아 시작합니다. 그다음 예배 화면의 탭을 왼쪽부터 차례로 채우면 됩니다.</p>
+        <Shot src="01-home.jpg" cap="이번 주 준비함 — 할 일이 순서대로 보이고, '다음으로 할 일'을 바로 누를 수 있습니다." />
         <table className="guide-table">
           <tbody>
             <tr><th>예배 정보</th><td>날짜, 본문, 설교 제목, 대표 기도, 광고, 설교 원고. 한 번 입력하면 예배송출 자막(성경 봉독·말씀 선포·교회 소식·대표 기도)에 자동으로 들어갑니다. 글을 쓰면 저절로 저장됩니다.</td></tr>
@@ -46,6 +57,7 @@ export default function Guide() {
             <tr><th>설교 후 자료</th><td>설교 원고로 인포그래픽·블로그 글·소그룹 나눔지를 만듭니다.</td></tr>
           </tbody>
         </table>
+        <Shot src="02-info.jpg" cap="예배 정보 탭 — 본문·제목·대표 기도·광고를 한 번 쓰면 예배송출 자막에 그대로 들어갑니다." />
         <p className="muted small">탭 이름 옆 점은 아직 할 일이 남았다는 표시입니다. 이번 주 준비함의 <b>준비 이어하기</b>를 누르면 남은 곳으로 바로 갑니다.</p>
         <p className="muted small">예배송출과 처음 이을 때는 <b>예배송출에 주일 예배 순서 새로 만들기</b>를 누르거나, 이미 있는 순서를 골라 <b>이 순서와 연결</b>을 누릅니다.</p>
       </div>
@@ -58,6 +70,8 @@ export default function Guide() {
           <li>추천 곡이 찬양 자료에 있으면 <b>콘티에 넣기</b>, 없으면 <b>새 곡으로 콘티에 넣기</b>(가사는 예배송출에서 넣습니다).</li>
           <li>조성·곡 구성은 곡 자체에 저장되어 다른 주에도 같이 바뀝니다. 지난 예배 모습은 자막 확정본으로 남겨 두세요.</li>
         </ul>
+        <Shot src="03-setlist.jpg" cap="찬양 콘티 탭 — 왼쪽에서 순서·조성·곡 구성을 정하고, 오른쪽 찬양 자료에서 곡을 넣습니다." />
+        <Shot src="03b-recommend.jpg" cap="찬양 추천 — 추천 이유와 분위기, 이미 콘티에 있는 곡, 바로 넣을 수 있는 곡이 함께 보입니다." />
       </div>
 
       <div className="card" id="subs">
@@ -67,6 +81,8 @@ export default function Guide() {
           <li>확정 뒤 바뀐 곳이 있으면 알려 주고, <b>확정본으로 되돌리기</b>로 되돌릴 수 있습니다.</li>
           <li><b>송출 화면 주소</b>는 예배당 TV나 OBS에 넣는 주소입니다. 자막 편집은 <b>예배송출에서 편집 ↗</b>을 누릅니다.</li>
         </ul>
+        <Shot src="04-subs.jpg" cap="자막 탭 — 예배 순서와 자막 화면 수를 확인하고 '자막 확정'을 누릅니다." />
+        <Shot src="05-outputs.jpg" cap="결과물 탭 — 준비 상태 점검, 카톡용 콘티 글 복사, 콘티 인쇄." />
       </div>
 
       <div className="card" id="after">
@@ -80,6 +96,11 @@ export default function Guide() {
             <tr><th>🔥 소그룹 나눔지 (청소년)</th><td>75분 · 웜업, OX 퀴즈, 토크타임, 이번 주 챌린지, 함께 기도.</td></tr>
           </tbody>
         </table>
+        <Shot src="06-after.jpg" cap="설교 후 자료 탭 — 자료마다 만들기·열어 보기·파일로 받기. 블로그 글은 바로 복사할 수 있습니다." />
+        <div className="shot-pair">
+          <Shot src="ex-infographic.jpg" cap="만든 예: 설교 인포그래픽 (예시 원고로 만든 실제 결과의 윗부분)" />
+          <Shot src="ex-sg-adult.jpg" cap="만든 예: 장년 소그룹 나눔지 (같은 예시 원고)" />
+        </div>
         <p className="alert warn small">AI가 만든 자료는 꼭 한 번 읽어 보고 나눠 주세요. 원고에 없는 구절이나 예화는 쓰지 않게 했지만, 성경 구절·인용이 원고와 같은지 확인이 필요합니다.</p>
         <p className="muted small">원고를 고쳤다면 <b>다시 만들기</b>를 누르세요. 만든 자료는 그 예배 기록에 보관되고, 예배 기록을 지우면 함께 지워집니다.</p>
       </div>
@@ -122,7 +143,7 @@ export default function Guide() {
 
       <div className="card" id="install">
         <h2>10. 설치와 업데이트 (맥·윈도우)</h2>
-        <p>받는 곳: <a href="https://github.com/raon-easypaster/church-allinone/releases/latest" target="_blank" rel="noopener">GitHub 릴리스 페이지</a></p>
+        <p>받는 곳: <a href="https://raon-easypaster.github.io/church-allinone/" target="_blank" rel="noopener">raon-easypaster.github.io/church-allinone</a></p>
         <h3>맥 (ChurchAllInOne-mac.zip)</h3>
         <ol>
           <li>압축을 풀고 <code>설치하기.command</code>를 <b>마우스 오른쪽 버튼 → 열기</b>로 실행합니다. 처음 한 번 "확인되지 않은 개발자" 경고가 뜨면 다시 <b>열기</b>를 누르세요.</li>
