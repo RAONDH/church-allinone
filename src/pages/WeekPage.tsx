@@ -6,6 +6,7 @@ import type { PraiseFlowStatus, Rec, Recs, Song, SummaryItem, SyncResult, Week, 
 import { fmtDate, fmtTime, matchSongs, norm, prepSteps, setlistText } from '../lib/week';
 import { StepList } from './Home';
 import AfterTab from './AfterTab';
+import { docText } from '../lib/docText';
 
 const TABS = [['info', '예배 정보'], ['setlist', '찬양 콘티'], ['subs', '자막'], ['outputs', '결과물'], ['after', '설교 후 자료']] as const;
 const EDITABLE = ['date', 'name', 'passage', 'sermonTitle', 'announcements', 'sermonNotes', 'sermonVideoUrl', 'prayerLeader'] as const;
@@ -164,6 +165,7 @@ function InfoTab({ week, status, update, replaceWeek, loadStatus }: { week: Week
         <div className="card">
           <h2>설교 자료</h2>
           <label>설교 원고 또는 요지<textarea rows={8} value={week.sermonNotes} placeholder="원고를 붙여 넣거나 요지를 적어 두세요. 주보·묵상지·쇼츠 등 설교 후 자료에 다시 쓰입니다." onChange={(e) => update({ sermonNotes: e.target.value })} /></label>
+          <NotesFile current={week.sermonNotes} onText={(t) => update({ sermonNotes: t })} />
           <label>설교 영상 주소 <span className="muted small">(예배 후 · 쇼츠 만들 때 사용)</span><input value={week.sermonVideoUrl} placeholder="https://youtube.com/…" onChange={(e) => update({ sermonVideoUrl: e.target.value })} /></label>
         </div>
         <div className="card">
@@ -556,6 +558,29 @@ function OutputsTab({ week, status, steps }: { week: Week; status: WeekStatus | 
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// 원고 파일(워드·한글 hwpx·글 파일)에서 글을 꺼내 '설교 원고' 칸에 넣는다. 파일은 이 컴퓨터 화면 안에서만 읽는다.
+function NotesFile({ current, onText }: { current: string; onText: (t: string) => void }) {
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const pick = async (f: File | undefined) => {
+    if (!f) return;
+    setMsg(null);
+    try {
+      const t = (await docText(f)).trim();
+      if (!t) throw new Error('파일에서 글을 찾지 못했습니다.');
+      if (current.trim() && !confirm(`지금 적혀 있는 원고(${current.trim().length}자)를 "${f.name}"의 글(${t.length}자)로 바꿀까요?`)) return;
+      onText(t);
+      setMsg({ ok: true, text: `"${f.name}"에서 ${t.length.toLocaleString('ko-KR')}자를 넣었습니다. 표·그림·각주는 빠질 수 있으니 한 번 훑어봐 주세요.` });
+    } catch (e: any) { setMsg({ ok: false, text: e.message }); }
+  };
+  return (
+    <div className="notes-file">
+      <label className="btn small">원고 파일에서 가져오기<input type="file" hidden accept=".docx,.hwpx,.txt,.md,.hwp,.pdf,.doc" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} /></label>
+      <span className="muted small">워드(.docx) · 한글(.hwpx) · 글(.txt)</span>
+      {msg && <p className={msg.ok ? 'ok-text small' : 'alert err small'}>{msg.text}</p>}
     </div>
   );
 }

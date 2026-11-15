@@ -1,6 +1,6 @@
 export type Ws = 'real' | 'sample';
 
-export interface Church { name: string; pastor: string; defaultServiceName: string; sample?: boolean }
+export interface Church { name: string; pastor: string; defaultServiceName: string; theology?: string; sample?: boolean }
 
 export interface Snapshot {
   serviceId: string; name: string; date: string; itemIds: string[];

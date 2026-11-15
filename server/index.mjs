@@ -145,6 +145,13 @@ async function ensureRunning(app) {
 
 // 설교 후 자료 만들기는 몇 분 걸려서 뒤에서 돌리고 화면은 상태를 다시 묻는다 (서버를 끄면 진행 중인 것은 사라짐)
 const afterJobs = new Map(), afterErrors = new Map();
+// 한꺼번에 여러 개를 눌러도 AI 구독은 두 개씩만 돌린다 (나머지는 차례를 기다림)
+const AFTER_MAX = 2, afterWait = [];
+let afterBusy = 0;
+function afterRun(job, task) {
+  const go = () => { afterBusy++; job.waiting = false; job.startedAt = Date.now(); task().finally(() => { afterBusy--; const next = afterWait.shift(); if (next) next(); }); };
+  if (afterBusy < AFTER_MAX) go(); else { job.waiting = true; afterWait.push(go); }
+}
 
 // ── API ──────────────────────────────────────────
 async function api(req, res, url) {
@@ -179,7 +186,7 @@ async function api(req, res, url) {
   }
   if (sub === '/church' && req.method === 'PUT') {
     const b = await body(req);
-    db.church = { ...(db.church || {}), name: str(b.name, 60), pastor: str(b.pastor, 40), defaultServiceName: str(b.defaultServiceName || '주일 예배', 40) };
+    db.church = { ...(db.church || {}), name: str(b.name, 60), pastor: str(b.pastor, 40), defaultServiceName: str(b.defaultServiceName || '주일 예배', 40), theology: str(b.theology ?? db.church?.theology ?? '', 200) };
     if (!db.church.name.trim()) throw new HttpError(400, '교회 이름을 입력해 주세요.');
     await sp.store.save();
     return send(res, 200, db.church);
@@ -461,14 +468,14 @@ async function api(req, res, url) {
       provider = (b.provider === 'claude' || b.provider === 'codex') && st[b.provider].loggedIn ? b.provider : st.provider;
       if (!provider) throw new HttpError(400, '이 컴퓨터에 로그인된 AI 구독이 없습니다. Claude Code(claude) 또는 Codex(codex login)에 로그인해 주세요.');
     }
-    const ctx = { church: db.church?.name || '', pastor: db.church?.pastor || '', date: w.date, service: w.name, passage: w.passage, title: w.sermonTitle, notes: w.sermonNotes.trim().slice(0, 60000) };
+    const ctx = { church: db.church?.name || '', pastor: db.church?.pastor || '', theology: db.church?.theology || '', date: w.date, service: w.name, passage: w.passage, title: w.sermonTitle, notes: w.sermonNotes.trim().slice(0, 60000) };
     const job = { startedAt: Date.now(), provider, label: sample ? '예제' : LABELS[provider] };
     afterJobs.set(key, job); afterErrors.delete(key);
-    (async () => {
+    afterRun(job, async () => {
       try {
         let content;
         if (sample) { await new Promise((ok) => setTimeout(ok, 1200)); content = sampleResult(kind, ctx); }
-        else { const { system, prompt } = buildPrompt(kind, ctx); content = extractResult(kind, await generate(provider, system, prompt)); }
+        else { const { system, prompt } = buildPrompt(kind, ctx); content = extractResult(kind, await generate(provider, system, prompt), ctx); }
         db.after ??= {};
         if (!db.weeks[w.id]) return;   // 그 사이 예배 기록이 지워졌으면 버림
         (db.after[w.id] ??= {})[kind] = { at: Date.now(), via: job.label, sample, basis: `${w.sermonTitle || ''} · 원고 ${ctx.notes.length}자`, content };
@@ -477,7 +484,7 @@ async function api(req, res, url) {
         console.error(`설교 후 자료(${kind}) 실패:`, e.message);
         afterErrors.set(key, { at: Date.now(), message: e.message || '만들지 못했습니다.', kind: e.kind || 'fail' });
       } finally { afterJobs.delete(key); }
-    })();
+    });
     return send(res, 200, { ok: true, running: job });
   }
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/after\/([\w-]+)(\/view)?$/)) && req.method === 'GET') {
@@ -491,7 +498,7 @@ async function api(req, res, url) {
     if (ext === 'html') {
       // AI가 만든 페이지는 따로 떨어진 상자(sandbox)에서만 열어 라온 교회 올인원 자료에 손대지 못하게 한다
       headers['Content-Type'] = 'text/html; charset=utf-8';
-      headers['Content-Security-Policy'] = "sandbox allow-scripts allow-modals allow-popups; default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src data:; script-src 'unsafe-inline'";
+      headers['Content-Security-Policy'] = "sandbox allow-scripts allow-modals allow-popups allow-downloads; default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com data:; img-src data:; script-src 'unsafe-inline'";
     } else headers['Content-Type'] = 'text/plain; charset=utf-8';
     res.writeHead(200, headers); res.end(d.content); return;
   }

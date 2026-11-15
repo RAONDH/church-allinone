@@ -162,7 +162,7 @@ export function Apps() {
 export function Settings() {
   const { ov, base, reload, ws } = useApp();
   const nav = useNavigate();
-  const [f, setF] = useState({ name: ov?.church?.name || '', pastor: ov?.church?.pastor || '', defaultServiceName: ov?.church?.defaultServiceName || '주일 예배' });
+  const [f, setF] = useState({ name: ov?.church?.name || '', pastor: ov?.church?.pastor || '', defaultServiceName: ov?.church?.defaultServiceName || '주일 예배', theology: ov?.church?.theology || '' });
   const [msg, setMsg] = useState('');
   const save = async () => {
     try { await api(`${base}/church`, { method: 'PUT', body: f }); await reload(); setMsg('저장했습니다.'); } catch (e: any) { setMsg(e.message); }
@@ -179,6 +179,7 @@ export function Settings() {
         <label>교회 이름<input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
         <label>목회자 이름<input value={f.pastor} onChange={(e) => setF({ ...f, pastor: e.target.value })} /></label>
         <label>기본 예배 이름<input value={f.defaultServiceName} onChange={(e) => setF({ ...f, defaultServiceName: e.target.value })} /></label>
+        <label>신학 관점·말투 <span className="muted small">(선택 · 설교 후 자료를 만들 때 AI에게 알려 줍니다)</span><input value={f.theology} onChange={(e) => setF({ ...f, theology: e.target.value })} placeholder="예: 웨슬리안 성결 신학, 사중복음(중생·성결·신유·재림). 따뜻하고 단정한 말투" /></label>
         <div className="row"><button className="primary" onClick={save}>저장</button>{msg && <span className="muted">{msg}</span>}</div>
       </div>
       <div className="card">

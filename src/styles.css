@@ -381,3 +381,11 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 .serve-print td { height: 12mm; }
 .care-serve div { font-size: .92rem; }
 .hist-ahead { background: var(--todo-bg); border-radius: 8px; padding: 6px 10px; margin: 0 0 6px; }
+
+/* 설교 후 자료 묶음 */
+.after-group { margin-top: 6px; }
+.after-group-title { margin: 14px 2px 8px; font-size: 1.02rem; }
+.notes-file { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: -4px 0 10px; }
+.notes-file p { flex-basis: 100%; margin: 0; }
+.notes-file label.btn { display: inline-block; cursor: pointer; margin: 0; padding: 5px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-weight: 400; font-size: .9rem; }
+.notes-file label.btn:hover { border-color: var(--accent); }

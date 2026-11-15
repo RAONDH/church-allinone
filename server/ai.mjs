@@ -13,7 +13,7 @@ export const LABELS = { claude: 'Claude 구독', codex: 'ChatGPT 구독' };
 
 class AiError extends Error { constructor(msg, kind = 'fail') { super(msg); this.kind = kind; } }
 
-function runCli(cmd, args, input, timeout) {
+export function runCli(cmd, args, input, timeout) {
   fs.mkdirSync(WORK_DIR, { recursive: true });
   return new Promise((resolve, reject) => {
     let child;
@@ -21,6 +21,8 @@ function runCli(cmd, args, input, timeout) {
     catch (e) { reject(e.code === 'ENOENT' ? new AiError(`${cmd} 프로그램이 이 컴퓨터에 없습니다.`, 'missing') : e); return; }
     let out = '', err = '';
     const t = setTimeout(() => { child.kill('SIGTERM'); reject(new AiError(`AI 응답이 ${Math.round(timeout / 60000)}분 넘게 없어 멈췄습니다. 잠시 뒤 다시 시도해 주세요.`, 'timeout')); }, timeout);
+    // 한글은 한 글자가 여러 바이트라, 조각마다 글자로 바꾸면 조각 경계에 걸린 글자가 깨진다 → 이어서 풀기
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', (c) => { out += c; });
     child.stderr.on('data', (c) => { err += c; if (err.length > 1e5) err = err.slice(-5e4); });
     child.on('error', (e) => { clearTimeout(t); reject(e.code === 'ENOENT' ? new AiError(`${cmd} 프로그램이 이 컴퓨터에 없습니다.`, 'missing') : e); });

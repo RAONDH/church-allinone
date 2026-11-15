@@ -115,6 +115,7 @@ export function transcribe(file, k, onProgress = () => {}) {
       const m = [...s.matchAll(/progress\s*=\s*(\d+)%/g)].pop();
       if (m) onProgress(+m[1]);
     };
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', onData); child.stderr.on('data', onData);
     child.on('error', (e) => reject(new Error(`녹취 엔진을 실행하지 못했습니다: ${e.message}`)));
     child.on('close', (code) => {
