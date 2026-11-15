@@ -40,32 +40,19 @@
   {
     "id": "shorts",
     "name": "설교 쇼츠 제작",
-    "desc": "설교 영상을 쇼츠로 편집",
+    "desc": "설교 유튜브 링크로 AI가 하이라이트를 찾아 자막 넣은 쇼츠 영상으로",
     "icon": "🎬",
     "color": "#c2410c",
     "port": 3939,
     "dir": "~/Applications/sermon-shorts-maker",
-    "start": "npm run start"
-  },
-  {
-    "id": "ledger",
-    "name": "회계장부",
-    "desc": "수입·지출 장부와 보고서",
-    "icon": "📒",
-    "color": "#0f766e",
-    "port": 5180,
-    "dir": "~/Applications/raon-church-ledger",
-    "start": "node node_modules/vite/bin/vite.js"
-  },
-  {
-    "id": "meditation",
-    "name": "주간묵상 생성기",
-    "desc": "설교문으로 7일 가정예배 묵상지 만들기",
-    "icon": "📖",
-    "color": "#7c3aed",
-    "port": 5175,
-    "dir": "~/Documents/주간묵상-생성기",
-    "start": "node server.mjs"
+    "start": "[ -d .next ] || { ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install --no-audit --no-fund && npx next build; }; npm run start",
+    "win": {
+      "exe": [
+        "%LOCALAPPDATA%\\Programs\\설교 쇼츠 메이커\\설교 쇼츠 메이커.exe",
+        "%LOCALAPPDATA%\\Programs\\sermon-shorts-creator\\설교 쇼츠 메이커.exe"
+      ],
+      "installer": "{bundle}/apps/설교 쇼츠 메이커 설치.exe"
+    }
   },
   {
     "id": "hwptopdf",
@@ -75,6 +62,14 @@
     "color": "#0369a1",
     "port": 5050,
     "dir": "~/Applications/hwp-pdf-to-markdown",
-    "start": "./venv/bin/python3 start-silent.py --no-open"
+    "start": "[ -x venv/bin/python3 ] || { python3 -m venv venv && venv/bin/pip install -q pyhwp olefile tqdm flask six pypdf; }; ./venv/bin/python3 start-silent.py --no-open",
+    "win": {
+      "dir": "{bundle}/apps/hwp-pdf-to-markdown",
+      "run": [
+        "cmd",
+        "/c",
+        "start-hub.cmd"
+      ]
+    }
   }
 ]

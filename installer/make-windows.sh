@@ -45,7 +45,7 @@ CZ="WorshipCaster-windows-$TAG.zip"
 if [ ! -f "$CZ" ]; then
   curl -sfL "https://github.com/$CASTER_REPO/releases/download/$TAG/WorshipCaster-windows.zip" -o "$CZ.part"
   curl -sfL "https://github.com/$CASTER_REPO/releases/download/$TAG/SHA256SUMS.txt" -o "caster-sums-$TAG.txt"
-  [ "$(grep ' WorshipCaster-windows.zip$' "caster-sums-$TAG.txt" | cut -d' ' -f1)" = "$(shasum -a 256 "$CZ.part" | cut -d' ' -f1)" ] || { echo "예배송출 체크섬 불일치"; rm -f "$CZ.part"; exit 1; }
+  [ "$(tr -d '\r' < "caster-sums-$TAG.txt" | grep ' WorshipCaster-windows.zip$' | cut -d' ' -f1)" = "$(shasum -a 256 "$CZ.part" | cut -d' ' -f1)" ] || { echo "예배송출 체크섬 불일치"; rm -f "$CZ.part"; exit 1; }
   mv "$CZ.part" "$CZ"
 fi
 python3 - "$CZ" "$ROOT/apps" <<'PY'
@@ -74,6 +74,39 @@ printf '%s\r\n' '@echo off' \
   'cd /d "%~dp0app"' \
   'start "WorshipCaster (close this window to quit)" /min "%~dp0..\..\node\node.exe" server.js' \
   > "$CASTER/예배송출 실행.cmd"
+
+echo "▶ 설교 쇼츠 메이커 윈도우판 (공개 릴리스 설치 파일)"
+SHORTS_REPO="raon-easypaster/sermon-shorts-maker"
+cd "$CACHE"
+STAG="$(gh release view -R "$SHORTS_REPO" --json tagName -q .tagName 2>/dev/null || curl -sfL "https://api.github.com/repos/$SHORTS_REPO/releases/latest" | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')"
+SEXE="SermonShortsMaker-Setup-${STAG#v}.exe"
+if [ ! -f "$SEXE" ]; then
+  curl -sfL "https://github.com/$SHORTS_REPO/releases/download/$STAG/$SEXE" -o "$SEXE.part"
+  curl -sfL "https://github.com/$SHORTS_REPO/releases/download/$STAG/SHA256SUMS.txt" -o "shorts-sums-$STAG.txt"
+  [ "$(tr -d '\r' < "shorts-sums-$STAG.txt" | grep " $SEXE\$" | cut -d' ' -f1)" = "$(shasum -a 256 "$SEXE.part" | cut -d' ' -f1)" ] || { echo "설교 쇼츠 메이커 체크섬 불일치"; rm -f "$SEXE.part"; exit 1; }
+  mv "$SEXE.part" "$SEXE"
+fi
+cp "$SEXE" "$ROOT/apps/설교 쇼츠 메이커 설치.exe"
+
+echo "▶ HWP/PDF 변환기 (공개 저장소)"
+HWPD="$ROOT/apps/hwp-pdf-to-markdown"
+mkdir -p "$HWPD"
+curl -sfL "https://codeload.github.com/raon-easypaster/hwp-pdf-to-markdown/tar.gz/refs/heads/main" | tar -xz -C "$HWPD" --strip-components 1
+[ -f "$HWPD/app.py" ] || { echo "HWP/PDF 변환기를 받지 못했습니다"; exit 1; }
+# 올인원이 창 없이 켜는 실행 파일 (영문만). 파이썬이 없으면 PYTHON_MISSING 을 남기고 끝낸다
+printf '%s\r\n' '@echo off' \
+  'cd /d "%~dp0"' \
+  'set "PY="' \
+  'where py >nul 2>nul && set "PY=py -3"' \
+  'if not defined PY where python >nul 2>nul && set "PY=python"' \
+  'if not exist venv\Scripts\python.exe (' \
+  '  if not defined PY (echo PYTHON_MISSING & exit /b 9)' \
+  '  %PY% -m venv venv || (echo PYTHON_MISSING & exit /b 9)' \
+  '  venv\Scripts\python -m pip install -q pyhwp olefile tqdm flask six pypdf || exit /b 1' \
+  ')' \
+  'set FLASK_DEBUG=0' \
+  'venv\Scripts\python -m flask --app app run --host 127.0.0.1 --port 5050 --no-debugger --no-reload' \
+  > "$HWPD/start-hub.cmd"
 
 echo "▶ 실행 파일 · 사용법"
 # 실행 파일 내용은 영문만 (윈도우 명령 창 한글 깨짐 방지)
@@ -109,9 +142,11 @@ text = f"""라온 교회 올인원 v{ver} (윈도우) — 만든 사람: 쉬운�
 - 라온 교회 올인원 (이번 주 예배 준비)
 - 예배송출 (자막·콘티 송출) — 라온 교회 올인원에서 필요할 때 저절로 켭니다. 따로 켜려면 apps\\예배송출\\예배송출 실행.cmd
 - PraiseFlow 찬양 큐레이터 (찬양 추천)
+- 설교 쇼츠 메이커 — 라온 교회 올인원 '프로그램'에서 [설치하기]를 누르거나 apps\\설교 쇼츠 메이커 설치.exe 를 실행해 설치합니다. 설치한 뒤에는 바탕화면 아이콘이나 올인원에서 엽니다.
+- HWP/PDF 변환기 — 파이썬(Python 3)이 필요합니다. https://www.python.org/downloads/ 에서 설치할 때 'Add Python to PATH'를 꼭 체크하세요. 처음 열 때 필요한 부품을 저절로 받습니다.
 - Node.js (프로그램 안에 들어 있어 따로 설치할 필요 없음)
 
-AI 기능 (찬양 추천 · 설교 인포그래픽 · 블로그 글 · 소그룹 나눔지)
+AI 기능 (찬양 추천 · 설교 후 자료 · 회의록 정리)
 - 이 컴퓨터에 Claude Code 또는 Codex 를 설치하고 로그인해 두면, API 키 없이 쓰고 계신 구독으로 만듭니다.
 - 찬양 추천은 Gemini API 키로도 됩니다 (PraiseFlow 오른쪽 위 'AI 연결').
 
@@ -120,7 +155,7 @@ AI 기능 (찬양 추천 · 설교 인포그래픽 · 블로그 글 · 소그룹
 - 예배송출: %APPDATA%\\WorshipCaster
 업데이트할 때는 '라온 교회 올인원' 폴더만 새것으로 바꾸면 됩니다. 자료는 그대로 남습니다.
 
-성도 명부·재정·행정(일정·회의록·증명서)도 위 메뉴에서 씁니다. 이 자료는 AI나 인터넷으로 보내지 않습니다.
+성도 명부·재정·행정(일정·회의록·봉사·증명서)도 위 메뉴에서 씁니다. 이 자료는 AI나 인터넷으로 보내지 않습니다.
 회의 녹음을 받아 적으려면 행정 → 회의록 → '녹취 준비'에서 엔진과 모델을 먼저 받아 주세요.
 사용법은 프로그램 위 메뉴 '사용설명서'에 있습니다.
 문의: 카카오 오픈채팅 https://open.kakao.com/o/gSkET2Wi

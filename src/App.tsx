@@ -100,7 +100,7 @@ function Setup() {
   return (
     <div className="setup">
       <h1>혼자 목회해도, 매주 준비를 혼자 다 하지 않도록.</h1>
-      <p className="lead">라온 교회 올인원은 이미 쓰고 계신 예배송출(자막·콘티), 찬양곡 선정, 설교 쇼츠, 회계장부를 한 화면에 이어 줍니다.<br />
+      <p className="lead">라온 교회 올인원은 이미 쓰고 계신 예배송출(자막·콘티), 찬양곡 선정, 설교 쇼츠를 한 화면에 이어 줍니다.<br />
         예배 정보를 한 번 입력하면 예배송출 자막에도 그대로 들어갑니다.</p>
       <div className="setup-grid">
         <form className="card" onSubmit={submit}>
@@ -126,14 +126,16 @@ export function Apps() {
   const [apps, setApps] = useState<AppInfo[] | null>(null);
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
   const load = () => api<AppInfo[]>('/api/apps').then(setApps).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   const open = async (a: AppInfo) => {
-    setBusy(a.id); setErr('');
+    setBusy(a.id); setErr(''); setMsg('');
     const w = window.open('about:blank', '_blank');
     try {
-      const r = await api<{ url: string }>(`/api/apps/${a.id}/start`, { method: 'POST' });
-      if (w) w.location.href = r.url; else window.location.href = r.url;
+      const r = await api<{ url: string; message?: string }>(`/api/apps/${a.id}/start`, { method: 'POST' });
+      if (!r.url) { w?.close(); setMsg(r.message || ''); }
+      else if (w) w.location.href = r.url; else window.location.href = r.url;
       load();
     } catch (e: any) { w?.close(); setErr(`${a.name}: ${e.message}`); }
     setBusy('');
@@ -143,14 +145,15 @@ export function Apps() {
       <h1>프로그램</h1>
       <p className="muted">이미 쓰고 계신 프로그램을 여기서 켜고 엽니다. 필요할 때 자동으로 켜집니다.</p>
       {err && <p className="alert err">{err}</p>}
+      {msg && <p className="alert info">{msg}</p>}
       <div className="apps">
         {apps?.map((a) => (
           <div key={a.id} className="card app" style={{ borderTopColor: a.color }}>
             <div className="app-head"><span className="app-icon">{a.icon}</span><b>{a.name}</b></div>
             <p className="muted small">{a.desc}</p>
             <div className="row">
-              <span className={`pill ${a.running ? 'done' : 'info'}`}>{!a.installed ? '설치 폴더 없음' : a.running ? '켜져 있음' : '꺼져 있음'}</span>
-              <button disabled={!a.installed || busy === a.id} onClick={() => open(a)}>{busy === a.id ? '켜는 중…' : '열기'}</button>
+              <span className={`pill ${a.running ? 'done' : 'info'}`}>{!a.installed ? '설치되어 있지 않음' : a.needsInstall ? '설치 파일 있음' : a.desktop ? '데스크톱 앱' : a.running ? '켜져 있음' : '꺼져 있음'}</span>
+              <button disabled={!a.installed || busy === a.id} onClick={() => open(a)}>{busy === a.id ? '켜는 중…' : a.needsInstall ? '설치하기' : '열기'}</button>
             </div>
           </div>
         ))}

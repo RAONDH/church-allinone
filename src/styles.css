@@ -389,3 +389,31 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 .notes-file p { flex-basis: 100%; margin: 0; }
 .notes-file label.btn { display: inline-block; cursor: pointer; margin: 0; padding: 5px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-weight: 400; font-size: .9rem; }
 .notes-file label.btn:hover { border-color: var(--accent); }
+
+/* 설교 후 자료: 한눈에 보는 목록 */
+.after-head h2 { margin: 0 0 2px; }
+.after-head p { margin: 0; }
+.after-list { padding: 14px 18px; }
+.after-list h3 { margin: 0 0 4px; font-size: 1rem; }
+.after-list ul { list-style: none; margin: 0; padding: 0; }
+.after-row { display: grid; grid-template-columns: 2.2em 1fr auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.after-row:first-child { border-top: none; }
+.after-ico { font-size: 1.35rem; text-align: center; }
+.after-title { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.after-title .pill { font-size: .78rem; }
+.after-when { font-size: .8rem; color: var(--done); }
+.after-main .alert { margin: 6px 0 0; }
+.after-act { display: flex; gap: 6px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.after-act .btn, .after-act button { padding: 6px 12px; font-size: .9rem; }
+.after-act a.primary-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+.after-act button.quiet { background: none; border-color: transparent; color: var(--muted); }
+.after-act button.quiet:hover { color: var(--ink); border-color: var(--line); }
+.after-row .blog-box, .after-row .after-extra { grid-column: 2 / -1; }
+.after-row .blog-box { margin: 2px 0 0; }
+.after-row .blog-box .row { gap: 6px; }
+@media (max-width: 640px) {
+  .after-row { grid-template-columns: 2em 1fr; }
+  .after-act { grid-column: 2; justify-content: flex-start; }
+}
+.after-act button.primary-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
+.after-main .ok-text { margin: 4px 0 0; }

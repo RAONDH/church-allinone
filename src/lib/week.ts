@@ -64,7 +64,6 @@ export function prepSteps(w: Week, st: WeekStatus | null): Step[] {
         : `화면 ${s.slideTotal}장 준비됨 · 아직 확정 전`,
       action: ph.length ? '빈칸 채우기' : f === 'same' ? undefined : '자막 확정' });
   }
-  steps.push({ key: 'bulletin', label: '주보', tab: 'outputs', level: 'info', text: '2단계에서 지원 예정 (입력한 예배 정보·광고가 그대로 쓰입니다)' });
   const notes = w.sermonNotes.trim();
   steps.push({ key: 'sermon', label: '설교 자료', tab: 'info', level: notes ? 'done' : 'todo', text: notes ? `원고·요지 등록됨 (${notes.length.toLocaleString()}자)` : '설교 원고나 요지를 붙여 넣으세요', action: '설교 자료 등록' });
   return steps;

@@ -544,18 +544,6 @@ function OutputsTab({ week, status, steps }: { week: Week; status: WeekStatus | 
               </>
             ) : <p className="muted">아직 확정하지 않았습니다. 자막 탭에서 확정할 수 있습니다.</p>}
           </div>
-          <div className="card">
-            <h2>주보</h2>
-            <p className="muted">2단계에서 만듭니다. 지금 입력한 예배 정보·찬양 순서·광고가 그대로 주보에 들어가도록 연결할 예정입니다.</p>
-          </div>
-          <div className="card">
-            <h2>설교 후 자료</h2>
-            {week.sermonVideoUrl ? (
-              <p>설교 영상: <code>{week.sermonVideoUrl}</code> <button className="small" onClick={() => copy(week.sermonVideoUrl, '영상 주소를 복사했습니다. 쇼츠 제작에 붙여 넣으세요.')}>주소 복사</button></p>
-            ) : <p className="muted">예배 후 예배 정보 탭에 설교 영상 주소를 넣으면 쇼츠 제작에 바로 쓸 수 있습니다.</p>}
-            <p><Link to={`/week/${week.id}/after`}>설교 인포그래픽·블로그 글·소그룹 나눔지 만들기 →</Link></p>
-            <Link to="/apps">설교 쇼츠 제작 열기 →</Link>
-          </div>
         </div>
       </div>
     </div>

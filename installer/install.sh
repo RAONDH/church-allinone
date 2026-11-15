@@ -5,7 +5,9 @@
 #   2) 라온 교회 올인원        → ~/교회 올인원      (이미 있으면 프로그램만 새로 바꾸고 data 폴더의 자료는 그대로 둠)
 #   3) 예배송출.app       → ~/Applications    (이미 있으면 건드리지 않음)
 #   4) PraiseFlow 찬양 큐레이터 → ~/Documents/praiseflow---예배-찬양-큐레이터 (이미 있으면 건드리지 않음)
-#   5) 바탕화면에 '라온 교회 올인원' 실행 아이콘
+#   5) 설교 쇼츠 제작           → ~/Applications/sermon-shorts-maker (이미 있으면 건드리지 않음)
+#   6) HWP/PDF 변환기          → ~/Applications/hwp-pdf-to-markdown (이미 있으면 건드리지 않음)
+#   7) 바탕화면에 '라온 교회 올인원' 실행 아이콘
 # 관리자 암호는 필요 없습니다. 인터넷 연결이 필요합니다(Node.js·부품 내려받기).
 set -u
 PKG="$(cd "$(dirname "$0")" && pwd)"
@@ -100,7 +102,46 @@ else
   warn "설치 묶음에 PraiseFlow가 없어 건너뜁니다. 찬양 추천 기능은 PraiseFlow가 있어야 합니다."
 fi
 
-# ── 5) 바탕화면 실행 아이콘 ─────────────────────────
+# ── 5) 설교 쇼츠 제작 ──────────────────────────────
+say "설교 쇼츠 제작"
+SH="$HOME/Applications/sermon-shorts-maker"
+if [ -d "$SH" ]; then
+  ok "이미 설치됨 · 그대로 둡니다"
+elif [ -d "$PKG/apps/sermon-shorts-maker" ]; then
+  copy_dir "$PKG/apps/sermon-shorts-maker" "$SH" node_modules .next .data || fail "설교 쇼츠 제작을 복사하지 못했습니다."
+  echo "  부품 설치·화면 만들기 중 (몇 분 걸립니다)…"
+  # 데스크톱(electron) 판은 쓰지 않으므로 그 부품은 받지 않는다
+  if (cd "$SH" && ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm install --no-audit --no-fund >>"$LOG" 2>&1 && npx next build >>"$LOG" 2>&1); then
+    ok "$SH (처음 쇼츠를 만들 때 영상 도구 ffmpeg·yt-dlp를 저절로 받습니다)"
+  else
+    warn "설교 쇼츠 제작 준비를 마치지 못했습니다. 올인원 '프로그램'에서 처음 열 때 다시 준비합니다."
+  fi
+else
+  warn "설치 묶음에 설교 쇼츠 제작이 없어 건너뜁니다."
+fi
+
+# ── 6) HWP/PDF 변환기 ─────────────────────────────
+say "HWP/PDF 변환기"
+HW="$HOME/Applications/hwp-pdf-to-markdown"
+if [ -d "$HW" ]; then
+  ok "이미 설치됨 · 그대로 둡니다"
+elif [ -d "$PKG/apps/hwp-pdf-to-markdown" ]; then
+  copy_dir "$PKG/apps/hwp-pdf-to-markdown" "$HW" venv || fail "HWP/PDF 변환기를 복사하지 못했습니다."
+  # 맥의 파이썬은 '개발자 도구'에 들어 있다. 없으면 python3 가 설치 창을 띄우므로 먼저 확인만 한다
+  if xcode-select -p >/dev/null 2>&1 || [ -x /opt/homebrew/bin/python3 ] || [ -x /usr/local/bin/python3 ]; then
+    if (cd "$HW" && python3 -m venv venv >>"$LOG" 2>&1 && venv/bin/pip install -q pyhwp olefile tqdm flask six pypdf >>"$LOG" 2>&1); then
+      ok "$HW"
+    else
+      warn "변환기 부품 설치를 마치지 못했습니다. 올인원 '프로그램'에서 처음 열 때 다시 준비합니다."
+    fi
+  else
+    warn "이 맥에 파이썬(개발자 도구)이 없어 변환기 준비를 미룹니다. 터미널에서 xcode-select --install 을 실행한 뒤 올인원 '프로그램'에서 여세요."
+  fi
+else
+  warn "설치 묶음에 HWP/PDF 변환기가 없어 건너뜁니다."
+fi
+
+# ── 7) 바탕화면 실행 아이콘 ─────────────────────────
 say "바탕화면 실행 아이콘"
 APP="$HOME/Desktop/라온 교회 올인원.app"
 # 예전 이름('교회 올인원')으로 만든 실행 아이콘이 우리 것이면 새 이름으로 바꿈
@@ -122,9 +163,9 @@ say "설치를 마쳤습니다"
 echo "  • 바탕화면의 '라온 교회 올인원'을 두 번 누르면 열립니다 (주소: http://localhost:5191)."
 echo "  • 첫 화면에서 교회 이름을 넣으면 시작합니다. 먼저 둘러보려면 '먼저 예제로 둘러보기'를 고르세요."
 echo "  • 찬양 추천은 PraiseFlow의 'AI 연결'에서 Claude·ChatGPT 구독 또는 Gemini API 키를 연결해야 합니다."
-echo "  • 설교 인포그래픽·블로그 글·소그룹 나눔지는 Claude Code 또는 Codex 로그인이 필요합니다."
+echo "  • 설교 후 자료(인포그래픽·카드뉴스·나눔지·묵상 등)는 Claude Code 또는 Codex 로그인이 필요합니다."
+echo "  • 설교 쇼츠 제작은 처음 쓸 때 쇼츠 화면의 'AI 연결'을 해 주세요(구독 로그인 또는 Gemini API 키)."
 echo "  • 사용법은 프로그램 위 메뉴 '사용설명서'를 보세요."
-echo "  • 설교 쇼츠·회계장부·주간묵상·HWP 변환기는 이 묶음에 들어 있지 않습니다(따로 설치하면 '프로그램' 화면에 나타납니다)."
 echo
 echo "  ♡ 후원 안내: 라온 교회 올인원은 자율 후원으로 운영됩니다. 후원은 부담을 갖지 않으셔도 됩니다. 무료로 사용하셔도 괜찮습니다."
 echo "    카카오뱅크 3333-01-9034483 (이광복)"

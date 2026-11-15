@@ -124,7 +124,14 @@ async function linkTemplate(sp, w, template = 'sunday') {
 const expand = (v) => String(v || '').replace(/^~(?=[\\/]|$)/, os.homedir()).replace(/\{bundle\}/g, BUNDLE_DIR).replace(/%(\w+)%/g, (m, k) => process.env[k] ?? m);
 const loadApps = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps.json'), 'utf8'))
   .map((a) => (WIN ? (a.win ? { ...a, ...a.win } : null) : a)).filter(Boolean)
-  .map((a) => ({ ...a, dir: path.normalize(expand(a.dir)), env: Object.fromEntries(Object.entries(a.env || {}).map(([k, v]) => [k, expand(v)])) }));
+  .map((a) => ({
+    ...a, dir: a.dir ? path.normalize(expand(a.dir)) : '', env: Object.fromEntries(Object.entries(a.env || {}).map(([k, v]) => [k, expand(v)])),
+    exe: (a.exe ? [].concat(a.exe) : []).map((x) => path.normalize(expand(x))), installer: a.installer ? path.normalize(expand(a.installer)) : '',
+  }));
+// 자기 창을 띄우는 데스크톱 앱(윈도우의 설교 쇼츠 메이커 등): 설치되어 있으면 실행, 아니면 묶음에 든 설치 파일을 연다
+const appExe = (a) => a.exe.find((x) => fs.existsSync(x)) || '';
+const appInstalled = (a) => (a.exe.length ? !!appExe(a) || (!!a.installer && fs.existsSync(a.installer)) : fs.existsSync(a.dir));
+const logTail = (id) => { try { return fs.readFileSync(path.join(LOG_DIR, `${id}.log`), 'utf8').trim().split('\n').slice(-3).join(' ').slice(-300); } catch { return ''; } };
 async function probe(app) {
   try { await fetch(`http://localhost:${app.port}/`, { signal: AbortSignal.timeout(1500) }); return true; } catch { return false; }
 }
@@ -139,8 +146,18 @@ async function ensureRunning(app) {
     ? spawn(app.run[0] === 'node' ? process.execPath : app.run[0], app.run.slice(1), { cwd: app.dir, detached: true, stdio: ['ignore', log, log], env, windowsHide: true })
     : spawn('/bin/zsh', ['-lc', app.start], { cwd: app.dir, detached: true, stdio: ['ignore', log, log], env });
   child.unref();
-  for (let i = 0; i < 120; i++) { if (await probe(app)) return; await new Promise((r) => setTimeout(r, 500)); }
-  throw new HttpError(504, `프로그램이 제때 켜지지 않았습니다. 기록: ${path.join(LOG_DIR, `${app.id}.log`)}`);
+  let exited = null;
+  child.on('exit', (code) => { exited = code; });
+  // 처음 켤 때 부품을 받거나 화면을 만드는 프로그램이 있어 넉넉히 기다린다 (최대 3분)
+  for (let i = 0; i < 360; i++) {
+    if (await probe(app)) return;
+    if (exited !== null && exited !== 0) {
+      const tail = logTail(app.id);
+      throw new HttpError(500, /PYTHON_MISSING/.test(tail) ? `${app.name}에는 파이썬(Python 3)이 필요합니다. https://www.python.org/downloads/ 에서 설치한 뒤(윈도우는 'Add Python to PATH' 체크) 다시 눌러 주세요.` : `${app.name}을 켜지 못했습니다. ${tail ? `(${tail})` : ''} 기록: ${path.join(LOG_DIR, `${app.id}.log`)}`);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new HttpError(504, `프로그램이 제때 켜지지 않았습니다. 처음 켤 때는 부품 준비로 오래 걸릴 수 있으니 잠시 뒤 다시 눌러 주세요. 기록: ${path.join(LOG_DIR, `${app.id}.log`)}`);
 }
 
 // 설교 후 자료 만들기는 몇 분 걸려서 뒤에서 돌리고 화면은 상태를 다시 묻는다 (서버를 끄면 진행 중인 것은 사라짐)
@@ -162,12 +179,19 @@ async function api(req, res, url) {
   if (p === '/api/health') return send(res, 200, { ok: true });
 
   if (p === '/api/apps' && req.method === 'GET') {
-    const apps = await Promise.all(loadApps().map(async (a) => ({ id: a.id, name: a.name, desc: a.desc, icon: a.icon, color: a.color, port: a.port, openPath: a.openPath || '/', installed: fs.existsSync(a.dir), running: await probe(a) })));
+    const apps = await Promise.all(loadApps().map(async (a) => ({ id: a.id, name: a.name, desc: a.desc, icon: a.icon, color: a.color, port: a.port, openPath: a.openPath || '/', installed: appInstalled(a), desktop: a.exe.length > 0, needsInstall: a.exe.length > 0 && !appExe(a), running: a.port ? await probe(a) : false })));
     return send(res, 200, apps);
   }
   if ((r = m(/^\/api\/apps\/([\w-]+)\/start$/)) && req.method === 'POST') {
     const app = loadApps().find((a) => a.id === r[1]);
     if (!app) throw new HttpError(404, '알 수 없는 프로그램입니다.');
+    if (app.exe.length) {
+      const exe = appExe(app);
+      const target = exe || (app.installer && fs.existsSync(app.installer) ? app.installer : '');
+      if (!target) throw new HttpError(400, `${app.name}이 설치되어 있지 않습니다.`);
+      spawn(target, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      return send(res, 200, { ok: true, url: '', message: exe ? `${app.name} 창이 열립니다. 잠시 기다려 주세요.` : `${app.name} 설치 창을 열었습니다. 설치를 마친 뒤 다시 눌러 주세요.` });
+    }
     await ensureRunning(app);
     return send(res, 200, { ok: true, url: `http://localhost:${app.port}${app.openPath || '/'}` });
   }

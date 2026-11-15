@@ -29,7 +29,7 @@ describe('준비 상태는 저장된 내용으로만 완료 표시', () => {
   it('아무것도 없으면 예배 정보가 다음 할 일', () => {
     const s = prepSteps(week(), { linked: false, connected: null });
     expect(nextStep(s)?.key).toBe('info');
-    expect(s.find((x) => x.key === 'bulletin')?.level).toBe('info');
+    expect(s.find((x) => x.key === 'bulletin')).toBeUndefined();   // 주보 요약은 설교 후 자료에서 만든다
   });
   it('예배송출이 꺼져 있으면 완료로 표시하지 않음', () => {
     const s = prepSteps(week({ passage: '요 3:16', sermonTitle: '사랑' }), { linked: true, connected: false });

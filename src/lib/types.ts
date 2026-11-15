@@ -43,7 +43,7 @@ export interface Song {
   slideCount: number; lastUsed: string | null; meta: { writer?: string; source?: string; distinguish?: string };
 }
 
-export interface AppInfo { id: string; name: string; desc: string; icon: string; color: string; port: number; openPath: string; installed: boolean; running: boolean }
+export interface AppInfo { id: string; name: string; desc: string; icon: string; color: string; port: number; openPath: string; installed: boolean; running: boolean; desktop?: boolean; needsInstall?: boolean }
 
 export type MemberStatus = 'active' | 'inactive' | 'moved' | 'deceased';
 export interface Member {

@@ -22,8 +22,8 @@ function zip(files: Record<string, string>) {
 }
 
 describe('설교 후 자료 · 새 종류', () => {
-  it('열 가지 종류, 지시문마다 원고에 없는 것을 지어내지 말라는 규칙과 신학 관점', () => {
-    expect(Object.keys(KINDS)).toHaveLength(10);
+  it('아홉 가지 종류, 지시문마다 원고에 없는 것을 지어내지 말라는 규칙과 신학 관점', () => {
+    expect(Object.keys(KINDS)).toHaveLength(9);   // 쇼츠는 '설교 쇼츠 제작' 프로그램이 영상으로 만든다
     for (const k of Object.keys(KINDS)) {
       const p = buildPrompt(k, ctx);
       expect(p.system).toContain('원고에 없는 구절을 지어내지 않는다');
@@ -31,7 +31,6 @@ describe('설교 후 자료 · 새 종류', () => {
       expect(p.prompt).toContain('[설교 원고]');
     }
     expect(buildPrompt('family', ctx).system).toContain('찬송가 번호나 곡 이름을 지어내지 않는다');
-    expect(buildPrompt('shorts', ctx).prompt).toContain('바꾸거나 지어내지 않는다');
     expect(buildPrompt('review', ctx).system).toContain('신학이나 교리를 평가하지 않고');
     expect(buildPrompt('review', ctx).prompt).toMatch(/약 \d+분 분량/);
   });
