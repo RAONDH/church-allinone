@@ -151,6 +151,10 @@ export async function peopleApi({ sub, req, res, db, save, body, send, HttpError
         db.attendance[d] = db.attendance[d].filter((id) => id !== m.id);
         if (!db.attendance[d].length) delete db.attendance[d];   // 빈 날을 '모두 결석'으로 세지 않게
       }
+      if (db.serve) {   // 봉사표: 지난 기록은 이름으로 남기고, 맡는 분 목록에서는 뺀다
+        for (const r of db.serve.roles) r.pool = r.pool.filter((id) => id !== m.id);
+        for (const day of Object.values(db.serve.plan)) for (const k of Object.keys(day)) day[k] = day[k].map((x) => (x === m.id ? m.name : x));
+      }
       await save();
       send(res, 200, { ok: true });
       return true;

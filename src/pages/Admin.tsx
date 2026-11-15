@@ -6,9 +6,10 @@ import type { Admin as AdminData, Cert, ChurchEvent, GcalCal, Member, Visit } fr
 import { eventsOn, monthGrid, upcomingEvents } from '../lib/admin';
 import { nextBirthday } from '../lib/people';
 import MinutesTab from './MinutesTab';
+import ServeTab from './ServeTab';
 import { fmtDate, fmtTime, ymd } from '../lib/week';
 
-const TABS = [['calendar', '일정'], ['minutes', '회의록'], ['certs', '증명서']] as const;
+const TABS = [['calendar', '일정'], ['minutes', '회의록'], ['serve', '봉사'], ['certs', '증명서']] as const;
 const KINDS = ['예배', '행사', '회의', '교육', '심방', '기타'];
 
 export function useAdmin() {
@@ -40,6 +41,7 @@ export default function Admin() {
       {!data ? (!err && <p className="muted">불러오는 중…</p>)
         : t === 'calendar' ? <Calendar data={data} members={members} visits={visits} reload={load} />
         : t === 'minutes' ? <MinutesTab data={data} reload={load} />
+        : t === 'serve' ? <ServeTab data={data} members={members} reload={load} />
         : <Certs data={data} members={members} reload={load} />}
     </section>
   );

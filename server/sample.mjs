@@ -168,3 +168,25 @@ export function sampleAdminSeed(members = {}, today = new Date()) {
   } };
   return { events, minutes, certs: {} };
 }
+
+// 예제 봉사 배정표: 지난 2주 + 다음 3주를 돌아가며 채워 둔다
+export function sampleServeSeed(members = {}, today = new Date()) {
+  const byName = (n) => Object.values(members).find((m) => m.name === n)?.id;
+  const P = (...ns) => ns.map(byName).filter(Boolean);
+  const roles = [
+    { id: 'd1', name: '대표기도', count: 1, pool: P('김믿음', '박소망', '이은혜') },
+    { id: 'd2', name: '안내', count: 2, pool: P('최기쁨', '윤온유', '한평안') },
+    { id: 'd3', name: '헌금위원', count: 2, pool: P('박소망', '이은혜', '윤온유', '최기쁨') },
+    { id: 'd4', name: '반주', count: 1, pool: P('김하늘') },
+    { id: 'd5', name: '차량', count: 1, pool: P('박소망', '김믿음') },
+    { id: 'd6', name: '식사 당번', count: 2, pool: P('이은혜', '최기쁨', '윤온유', '정사랑') },
+  ];
+  const sun = ymd(sundayOf(today));
+  const plan = {};
+  [-14, -7, 0, 7, 14].forEach((off, w) => {
+    const d = addDays(sun, off), day = {};
+    for (const r of roles) if (r.pool.length) day[r.id] = Array.from({ length: Math.min(r.count, r.pool.length) }, (_, k) => r.pool[(w * r.count + k) % r.pool.length]);
+    plan[d] = day;
+  });
+  return { serve: { roles, plan } };
+}

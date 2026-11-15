@@ -350,3 +350,34 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 .mac-steps li { margin: 6px 0; }
 .cmd { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 .cmd code { flex: 1; display: block; padding: 6px 8px; overflow-x: auto; white-space: nowrap; }
+
+/* 성도 기록 모아보기 */
+.history summary { cursor: pointer; margin-bottom: 8px; }
+.history .seg { margin: 4px 0 8px; flex-wrap: wrap; }
+.history .seg button { padding: 3px 10px; font-size: .85rem; }
+.hist { list-style: none; padding: 0; margin: 0; max-height: 320px; overflow: auto; }
+.hist li { display: grid; grid-template-columns: 6.5em 4em 1fr; gap: 8px; padding: 5px 2px; border-bottom: 1px dashed var(--line); font-size: .92rem; align-items: baseline; }
+.hist li.future { opacity: .65; }
+.hist-date { color: var(--muted); font-variant-numeric: tabular-nums; }
+.hist-kind { font-size: .78rem; text-align: center; border-radius: 99px; padding: 1px 6px; background: var(--bg); }
+.hist-kind.k-visit { background: var(--info-bg); color: var(--info); }
+.hist-kind.k-give { background: var(--done-bg); color: var(--done); }
+.hist-kind.k-serve { background: var(--todo-bg); color: var(--todo); }
+.hist-kind.k-church { background: var(--warn-bg); color: var(--warn); }
+
+/* 봉사 배정표 */
+.table-scroll { overflow-x: auto; }
+.serve-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.serve-table th, .serve-table td { border: 1px solid var(--line); padding: 0; text-align: left; font-size: .92rem; word-break: keep-all; min-width: 4.5em; }
+.serve-table thead th { background: var(--bg); padding: 6px 8px; white-space: nowrap; }
+.serve-table tbody th { padding: 6px 8px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.serve-table tr.past { opacity: .6; }
+.serve-cell { width: 100%; min-height: 36px; border: none; border-radius: 0; background: none; text-align: left; padding: 6px 8px; }
+.serve-cell:hover { background: var(--info-bg); }
+.role-list { list-style: none; padding: 0; margin: 0 0 10px; }
+.role-list li { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.role-list .chips.pool { margin: 8px 0 4px; }
+.serve-print h2 { text-align: center; margin-bottom: 8mm; }
+.serve-print td { height: 12mm; }
+.care-serve div { font-size: .92rem; }
+.hist-ahead { background: var(--todo-bg); border-radius: 8px; padding: 6px 10px; margin: 0 0 6px; }

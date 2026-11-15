@@ -42,6 +42,37 @@ export function cleanMinutes(b) {
   };
 }
 
+// 예배 봉사 배정표: 역할(이름·인원·맡는 분)과 날짜별 배정. 배정 칸은 성도 번호, 명부에 없는 분은 이름 글자.
+export const DEFAULT_SERVE_ROLES = [['대표기도', 1], ['안내', 2], ['헌금위원', 2], ['반주', 1], ['차량', 1], ['식사 당번', 2]].map(([name, count], i) => ({ id: `d${i + 1}`, name, count, pool: [] }));
+export function cleanServeRoles(list, members = {}) {
+  if (!Array.isArray(list)) throw bad('봉사 목록이 올바르지 않습니다.');
+  const seen = new Set();
+  return list.slice(0, 30).map((r) => {
+    const name = str(r?.name, 20).trim();
+    if (!name) throw bad('봉사 이름을 넣어 주세요.');
+    if (seen.has(name)) throw bad(`"${name}" 봉사가 두 번 있습니다.`);
+    seen.add(name);
+    const id = /^[a-z0-9]{1,24}$/.test(r?.id || '') ? r.id : uid();
+    const count = Math.max(1, Math.min(5, Math.round(+r?.count || 1)));
+    return { id, name, count, pool: [...new Set((Array.isArray(r?.pool) ? r.pool : []).filter((x) => members[x]))] };
+  });
+}
+/** 날짜별 배정 고치기: { 'YYYY-MM-DD': { 역할id: [..] } } — 빈 날은 지운다 */
+export function applyServePlan(serve, dates) {
+  const ids = new Set(serve.roles.map((r) => r.id));
+  for (const [raw, roles] of Object.entries(dates || {}).slice(0, 120)) {
+    const d = normDate(raw);
+    if (!d || !roles || typeof roles !== 'object') continue;
+    const day = {};
+    for (const [rid, xs] of Object.entries(roles)) {
+      if (!ids.has(rid) || !Array.isArray(xs)) continue;
+      const v = [...new Set(xs.map((x) => str(x, 30).trim()).filter(Boolean))].slice(0, 5);
+      if (v.length) day[rid] = v;
+    }
+    if (Object.keys(day).length) serve.plan[d] = day; else delete serve.plan[d];
+  }
+}
+
 // 구글 캘린더 비공개 주소(iCal): https 이고 이 컴퓨터·사설망 주소가 아닌 .ics 주소만
 export function checkIcsUrl(raw) {
   let u;
@@ -80,6 +111,7 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
   db.events ??= {}; db.minutes ??= {}; db.certs ??= {};
   if (db.gcal) { db.gcals = [{ id: uid(), color: '#1a73e8', ...db.gcal }]; delete db.gcal; }   // 예전 한 개 연결 → 목록으로
   db.gcals ??= []; db.meetingTypes ??= [...DEFAULT_MEETINGS];
+  db.serve ??= { roles: DEFAULT_SERVE_ROLES.map((r) => ({ ...r, pool: [] })), plan: {} };
   const wrap = (fn) => { try { return fn(); } catch (e) { throw e.code === 400 ? new HttpError(400, e.message) : e; } };
   // 일정·회의록은 같은 방식 (만들기·고치기·지우기)
   const crud = async (coll, path, clean, label) => {
@@ -98,8 +130,23 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
   };
 
   if (sub === '/admin' && req.method === 'GET') {
-    send(res, 200, { events: Object.values(db.events), minutes: Object.values(db.minutes), certs: Object.values(db.certs), meetingTypes: db.meetingTypes, gcals: db.gcals.map(gcalView), gcalEvents: db.gcals.filter((g) => !g.hidden).flatMap((g) => (g.events || []).map((e) => ({ ...e, id: `${g.id}-${e.id}`, cal: g.id }))) });
+    send(res, 200, { serve: db.serve, events: Object.values(db.events), minutes: Object.values(db.minutes), certs: Object.values(db.certs), meetingTypes: db.meetingTypes, gcals: db.gcals.map(gcalView), gcalEvents: db.gcals.filter((g) => !g.hidden).flatMap((g) => (g.events || []).map((e) => ({ ...e, id: `${g.id}-${e.id}`, cal: g.id }))) });
     return true;
+  }
+  // 봉사 배정표
+  if (sub === '/serve/roles' && req.method === 'PUT') {
+    const b = await body(req);
+    const roles = wrap(() => cleanServeRoles(b.roles, db.members || {}));
+    const keep = new Set(roles.map((r) => r.id));
+    for (const d of Object.keys(db.serve.plan)) {   // 지운 봉사의 배정도 함께 정리
+      for (const rid of Object.keys(db.serve.plan[d])) if (!keep.has(rid)) delete db.serve.plan[d][rid];
+      if (!Object.keys(db.serve.plan[d]).length) delete db.serve.plan[d];
+    }
+    db.serve.roles = roles; await save(); send(res, 200, { serve: db.serve }); return true;
+  }
+  if (sub === '/serve/plan' && req.method === 'PUT') {
+    const b = await body(req);
+    applyServePlan(db.serve, b.dates); await save(); send(res, 200, { serve: db.serve }); return true;
   }
   // 구글 캘린더 '가져오기'용 파일
   if (sub === '/events.ics' && req.method === 'GET') {

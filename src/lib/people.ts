@@ -1,5 +1,6 @@
 // 성도 명부 계산 (화면·시험에서 함께 씀). 오늘 날짜는 밖에서 넣어 시험할 수 있게 한다.
-import type { Member, People, Visit } from './types';
+import type { Cert, Member, Minutes, People, Serve, Tx, Visit } from './types';
+import { serveOf } from './serve';
 import { addDays, ymd } from './week';
 
 export const STATUS_LABEL: Record<Member['status'], string> = { active: '재적', inactive: '쉬는 중', moved: '이명', deceased: '별세' };
@@ -105,4 +106,44 @@ function splitCsv(l: string) {
 export function lastSunday(today: string) {
   const d = new Date(today + 'T00:00:00');
   return addDays(today, -d.getDay());
+}
+
+// ── 성도 한 분의 기록 모아보기 (명부·심방·출석·헌금·증명서·봉사·회의록) ──
+export type HistKind = 'church' | 'visit' | 'attend' | 'give' | 'cert' | 'serve' | 'meeting';
+export interface HistItem { date: string; kind: HistKind; text: string; future?: boolean }
+export const HIST_LABEL: Record<HistKind, string> = { church: '교회', visit: '심방', attend: '출석', give: '헌금', cert: '증명서', serve: '봉사', meeting: '회의' };
+const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
+
+export function memberHistory(m: Member, p: People, today: string, more: { tx?: Tx[]; certs?: Cert[]; serve?: Serve; minutes?: Minutes[] } = {}): HistItem[] {
+  const out: HistItem[] = [];
+  const day = (s: string) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '');
+  if (day(m.registeredAt)) out.push({ date: m.registeredAt, kind: 'church', text: '교회 등록' });
+  if (m.baptism && day(m.baptismDate || '')) out.push({ date: m.baptismDate!, kind: 'church', text: `${m.baptism}${m.baptismPlace ? ` (${m.baptismPlace}${m.baptismBy ? ` · ${m.baptismBy}` : ''})` : ''}` });
+  for (const v of p.visits) if (v.memberIds.includes(m.id)) out.push({ date: v.date, kind: 'visit', text: `${v.kind}${v.planned ? ' 예정' : ''}${v.note ? ` — ${v.note}` : ''}` });
+  // 출석: 해마다 한 줄 (그해 마지막으로 나온 날에)
+  const years: Record<string, { came: string[]; all: number }> = {};
+  for (const [d, ids] of Object.entries(p.attendance)) {
+    const y = (years[d.slice(0, 4)] ??= { came: [], all: 0 });
+    y.all++; if (ids.includes(m.id)) y.came.push(d);
+  }
+  for (const [y, a] of Object.entries(years)) {
+    if (!a.came.length) { if (!m.registeredAt || m.registeredAt.slice(0, 4) <= y) out.push({ date: `${y}-12-31` < today ? `${y}-12-31` : today, kind: 'attend', text: `${y}년 출석 기록 없음 (기록한 ${a.all}번 중)` }); continue; }
+    const last = a.came.sort()[a.came.length - 1];
+    out.push({ date: last, kind: 'attend', text: `${y}년 ${a.came.length}번 출석 (기록한 ${a.all}번 중) · 마지막 ${+last.slice(5, 7)}월 ${+last.slice(8)}일` });
+  }
+  // 헌금: 해마다 한 줄 (항목별 합계)
+  const give: Record<string, { last: string; n: number; sum: number; cat: Record<string, number> }> = {};
+  for (const t of more.tx || []) {
+    if (t.memberId !== m.id || t.type !== 'income' || /이월금$/.test(t.category)) continue;
+    const g = (give[t.date.slice(0, 4)] ??= { last: '', n: 0, sum: 0, cat: {} });
+    g.n++; g.sum += t.amount; g.cat[t.category] = (g.cat[t.category] || 0) + t.amount; if (t.date > g.last) g.last = t.date;
+  }
+  for (const [y, g] of Object.entries(give)) {
+    const cats = Object.entries(g.cat).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${won(n)}`).join(', ');
+    out.push({ date: g.last, kind: 'give', text: `${y}년 헌금 ${g.n}건 · ${won(g.sum)} (${cats})` });
+  }
+  for (const c of more.certs || []) if (c.memberId === m.id) out.push({ date: c.date, kind: 'cert', text: `${c.type} 발급 (제 ${c.no}호)${c.purpose ? ` · ${c.purpose}` : ''}` });
+  for (const s of serveOf(more.serve, m.id)) out.push({ date: s.date, kind: 'serve', text: `봉사: ${s.role}` });
+  if (m.name.length >= 2) for (const x of more.minutes || []) if ((x.attendees || '').includes(m.name)) out.push({ date: x.date, kind: 'meeting', text: `${x.meeting}${x.title ? ` "${x.title}"` : ''} 참석` });
+  return out.map((x) => (x.date > today ? { ...x, future: true } : x)).sort((a, b) => b.date.localeCompare(a.date) || a.kind.localeCompare(b.kind));
 }

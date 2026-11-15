@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore, uid } from './store.mjs';
 import { httpWc, memoryWc, findLinks, applyWeek, copyService, summarize, snapshot, fingerprint, diffSnapshots } from './wc.mjs';
-import { sampleWcSeed, sampleHubSeed, samplePeopleSeed, sampleFinanceSeed, sampleAdminSeed } from './sample.mjs';
+import { sampleWcSeed, sampleHubSeed, samplePeopleSeed, sampleFinanceSeed, sampleAdminSeed, sampleServeSeed } from './sample.mjs';
 import { aiStatus, generate, LABELS } from './ai.mjs';
 import { KINDS, MIN_NOTES, buildPrompt, extractResult, sampleResult } from './after.mjs';
 import { peopleApi } from './people.mjs';
@@ -38,7 +38,7 @@ const spaces = {
 async function resetSample() {
   sampleWc.reset();
   const people = samplePeopleSeed();
-  await spaces.sample.store.reset({ ...sampleHubSeed(await sampleWc.state()), ...people, peopleSeeded: true, finance: sampleFinanceSeed(people.members), financeSeeded: true, ...sampleAdminSeed(people.members), adminSeeded: true });
+  await spaces.sample.store.reset({ ...sampleHubSeed(await sampleWc.state()), ...people, peopleSeeded: true, finance: sampleFinanceSeed(people.members), financeSeeded: true, ...sampleAdminSeed(people.members), adminSeeded: true, ...sampleServeSeed(people.members), serveSeeded: true });
 }
 if (!spaces.sample.store.db.church) await resetSample();
 // 성도 명부가 생기기 전에 만든 예제 자료에도 예제 성도를 한 번 넣어 준다 (실제 교회 자료에는 넣지 않음)
@@ -46,6 +46,7 @@ if (!spaces.sample.store.db.church) await resetSample();
   const db = spaces.sample.store.db;
   if (!db.peopleSeeded) { Object.assign(db, samplePeopleSeed(), { peopleSeeded: true }); await spaces.sample.store.save(); }
   if (!db.adminSeeded) { Object.assign(db, sampleAdminSeed(db.members), { adminSeeded: true }); await spaces.sample.store.save(); }
+  if (!db.serveSeeded) { Object.assign(db, sampleServeSeed(db.members), { serveSeeded: true }); await spaces.sample.store.save(); }
   if (!db.financeSeeded) { Object.assign(db, { finance: sampleFinanceSeed(db.members), financeSeeded: true }); await spaces.sample.store.save(); }
 }
 

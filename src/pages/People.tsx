@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { api } from '../lib/api';
-import type { Member, People as PeopleData, Visit } from '../lib/types';
-import { absentees, ageOf, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
+import type { Admin as AdminData, Member, People as PeopleData, Tx, Visit } from '../lib/types';
+import { absentees, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
 import { fmtDate, ymd } from '../lib/week';
 import { WeekEvents } from './Admin';
+import { WeekServe } from './ServeTab';
 
 const TABS = [['list', '성도 명부'], ['visits', '심방'], ['attendance', '출석']] as const;
 type Tab = (typeof TABS)[number][0];
@@ -194,6 +195,7 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
         {member && <Giving memberId={member.id} />}
         {family.length > 0 && <p className="small">가족: {family.map((m) => `${m.name}${m.relation ? `(${m.relation})` : ''}`).join(', ')}</p>}
 
+        {member && <History data={data} member={member} />}
         {member && (
           <div className="sub-box">
             <div className="row between"><b>심방 기록 {visits.length}건</b><button className="small" onClick={() => setVisit('new')}>심방 기록 추가</button></div>
@@ -468,6 +470,7 @@ export function CareCard() {
           {due.length > 0 && <button className="link small" onClick={() => nav('/people/visits')}>심방 화면</button>}
         </div>
         <WeekEvents />
+        <WeekServe members={data.members} />
         <div>
           <div className="muted small">📋 3주 연속 결석</div>
           {absent.length ? <div>{absent.map((m) => m.name).join(', ')}</div> : <div className="muted small">{Object.keys(data.attendance).length < 3 ? '출석 기록 3주부터' : '없습니다'}</div>}
@@ -490,4 +493,45 @@ function Giving({ memberId }: { memberId: string }) {
   }, [base, memberId, year]);
   if (!g || !g.n) return null;
   return <p className="small">💰 {year}년 헌금 {g.n}건 · {g.total.toLocaleString('ko-KR')}원 <button className="link" onClick={() => nav('/finance/receipts')}>기부금 영수증</button></p>;
+}
+
+// 성도 창: 이분의 기록을 날짜순으로 (심방·출석·헌금·증명서·봉사·회의 참석)
+function History({ data, member }: { data: PeopleData; member: Member }) {
+  const { base } = useApp();
+  const [more, setMore] = useState<{ tx?: Tx[]; admin?: AdminData }>({});
+  const [kind, setKind] = useState<HistKind | ''>('');
+  const [all, setAll] = useState(false);
+  useEffect(() => {
+    api<{ tx: Tx[] }>(`${base}/finance`).then((f) => setMore((x) => ({ ...x, tx: f.tx }))).catch(() => {});
+    api<AdminData>(`${base}/admin`).then((a) => setMore((x) => ({ ...x, admin: a }))).catch(() => {});
+  }, [base]);
+  const today = ymd(new Date());
+  const items = useMemo(() => memberHistory(member, data, today, { tx: more.tx, certs: more.admin?.certs, serve: more.admin?.serve, minutes: more.admin?.minutes }), [member, data, today, more]);
+  const kinds = (Object.keys(HIST_LABEL) as HistKind[]).filter((k) => items.some((x) => x.kind === k));
+  const picked = items.filter((x) => !kind || x.kind === kind);
+  const ahead = picked.filter((x) => x.future).reverse();   // 앞으로 할 일은 가까운 것부터 한 줄로
+  const list = picked.filter((x) => !x.future);
+  const shown = all ? list : list.slice(0, 12);
+  return (
+    <details className="sub-box history" open>
+      <summary><b>기록 모아보기</b> <span className="muted small">{items.length}건 · 심방·출석·헌금·증명서·봉사·회의 참석</span></summary>
+      {!items.length ? <p className="muted small">아직 기록이 없습니다. 심방·출석·헌금(장부에서 이분과 이어진 것)·봉사를 기록하면 여기 모입니다.</p> : <>
+        <div className="seg small">
+          <button className={!kind ? 'on' : ''} onClick={() => setKind('')}>전체</button>
+          {kinds.map((k) => <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{HIST_LABEL[k]}</button>)}
+        </div>
+        {ahead.length > 0 && <p className="small hist-ahead"><b>앞으로</b> {ahead.slice(0, 6).map((x) => `${+x.date.slice(5, 7)}/${+x.date.slice(8)} ${x.text.replace(/^봉사: /, '')}`).join(' · ')}{ahead.length > 6 ? ` 외 ${ahead.length - 6}건` : ''}</p>}
+        <ul className="hist">
+          {shown.map((x, i) => (
+            <li key={i}>
+              <span className="hist-date">{x.date.slice(0, 4)}.{+x.date.slice(5, 7)}.{+x.date.slice(8)}</span>
+              <span className={`hist-kind k-${x.kind}`}>{HIST_LABEL[x.kind]}</span>
+              <span>{x.text}</span>
+            </li>
+          ))}
+        </ul>
+        {list.length > shown.length && <button className="link small" onClick={() => setAll(true)}>{list.length - shown.length}건 더 보기</button>}
+      </>}
+    </details>
+  );
 }

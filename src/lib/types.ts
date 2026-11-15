@@ -63,4 +63,6 @@ export interface ChurchEvent { id: string; date: string; endDate: string; time: 
 export interface Minutes { id: string; date: string; meeting: string; title: string; place: string; attendees: string; content: string; decisions: string; todos?: string; transcript?: string; chair: string; recorder: string; audio?: { file: string; name: string; size: number; at: number }; stt?: { at: number; model: string; seconds: number }; ai?: { at: number; via: string }; createdAt: number; updatedAt: number }
 export interface Cert { id: string; no: string; type: string; date: string; purpose: string; memberId: string; snap: { name: string; gender: string; birth: string; address: string; role: string; registeredAt: string; baptism: string; baptismDate: string; baptismPlace: string; baptismBy: string }; createdAt: number }
 export interface GcalCal { id: string; where: string; name: string; googleName: string; color: string; hidden: boolean; fetchedAt: number; error: string; count: number }
-export interface Admin { events: ChurchEvent[]; minutes: Minutes[]; certs: Cert[]; meetingTypes: string[]; gcals: GcalCal[]; gcalEvents: (ChurchEvent & { cal?: string })[] }
+export interface ServeRole { id: string; name: string; count: number; pool: string[] }
+export interface Serve { roles: ServeRole[]; plan: Record<string, Record<string, string[]>> }
+export interface Admin { serve: Serve; events: ChurchEvent[]; minutes: Minutes[]; certs: Cert[]; meetingTypes: string[]; gcals: GcalCal[]; gcalEvents: (ChurchEvent & { cal?: string })[] }
