@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { runChecks, ok, eq, HUB, sleep } from './harness/lib.mjs';
 
@@ -13,8 +14,19 @@ if (process.platform !== 'win32') { console.log('윈도우가 아니어서 윈�
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-win-'));
 const crlf = (src, dst) => fs.writeFileSync(dst, fs.readFileSync(src, 'utf8').replace(/\r?\n/g, '\r\n'));
-const health = async (port) => { try { return await (await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) })).json(); } catch { return null; } };
-const waitPort = async (url, ms) => { const end = Date.now() + ms; while (Date.now() < end) { try { const r = await fetch(url, { signal: AbortSignal.timeout(2000) }); if (r.ok) return true; } catch { /* 아직 */ } await sleep(1000); } return false; };
+// 이 컴퓨터 안 요청은 요청마다 연결을 닫는다 (켜 둔 서버를 끌 때 열린 연결이 남아 Node 가 멈추는 일을 막음)
+function req(url, { method = 'GET', body } = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const r = http.request({ host: u.hostname, port: u.port, path: u.pathname + u.search, method, agent: false, timeout: 2000, headers: { Connection: 'close', ...(body ? { 'Content-Type': 'application/json' } : {}) } }, (res) => {
+      let t = ''; res.setEncoding('utf8'); res.on('data', (c) => (t += c)); res.on('end', () => resolve({ status: res.statusCode, text: t }));
+    });
+    r.on('timeout', () => r.destroy(new Error('timeout'))); r.on('error', reject);
+    r.end(body ? JSON.stringify(body) : undefined);
+  });
+}
+const health = async (port) => { try { return JSON.parse((await req(`http://127.0.0.1:${port}/api/health`)).text); } catch { return null; } };
+const waitPort = async (url, ms) => { const end = Date.now() + ms; while (Date.now() < end) { try { if ((await req(url)).status === 200) return true; } catch { /* 아직 */ } await sleep(1000); } return false; };
 const expand = (v) => String(v).replace(/%(\w+)%/g, (m, k) => process.env[k] ?? m);
 const kill = (pid) => { try { spawnSync('taskkill', ['/PID', String(pid), '/T', '/F']); } catch { /* 이미 끝남 */ } };
 
@@ -33,7 +45,7 @@ const results = await runChecks('윈도우 묶음 실행 시험', [
     ok(h?.ok, '5191 에서 올인원이 답해야 함', h);
     eq(h.version, JSON.parse(fs.readFileSync(path.join(HUB, 'package.json'), 'utf8')).version, '켜진 버전');
     ok(fs.existsSync(path.join(appdata, 'ChurchAllInOne', 'backups')), '%APPDATA%\\ChurchAllInOne 자료 폴더', fs.readdirSync(appdata));
-    const r = await fetch('http://127.0.0.1:5191/api/ws/real/church', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '윈도우시험교회' }) });
+    const r = await req('http://127.0.0.1:5191/api/ws/real/church', { method: 'PUT', body: { name: '윈도우시험교회' } });
     eq(r.status, 200, '교회 정보 저장');
     ok(fs.readFileSync(path.join(appdata, 'ChurchAllInOne', 'real.json'), 'utf8').includes('윈도우시험교회'), '자료 파일에 저장됨');
     kill(h.pid);
