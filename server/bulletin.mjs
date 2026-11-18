@@ -27,7 +27,8 @@ export function summaryParts(markdown) {
 }
 
 /** 주보에 들어갈 자료 모으기 (db 와 예배 순서에서) */
-export function bulletinData({ db, week, order }) {
+/** hide: { people, admin } — 잠금이 걸린 동안은 성도·행정에서 온 내용(생일·봉사자 이름·일정)을 넣지 않는다 */
+export function bulletinData({ db, week, order, hide = {} }) {
   const s = { ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) };
   const date = week.date;
   const serveOn = (from, to) => {
@@ -43,7 +44,8 @@ export function bulletinData({ db, week, order }) {
     .filter((b) => b.date <= addDays(date, 6)).sort((a, b) => a.date.localeCompare(b.date));
   const events = Object.values(db.events || {}).filter((e) => e.date > date && e.date <= addDays(date, 7)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
   const sum = summaryParts(db.after?.[week.id]?.summary?.content);
-  return { s, church: db.church || {}, week, order: order || [], summary: sum, serveThis: serveOn(date, addDays(date, 6)), serveNext: serveOn(addDays(date, 7), addDays(date, 13)), birthdays, events };
+  const hideServe = hide.people || hide.admin;
+  return { s, church: db.church || {}, week, order: order || [], summary: sum, serveThis: hideServe ? null : serveOn(date, addDays(date, 6)), serveNext: hideServe ? null : serveOn(addDays(date, 7), addDays(date, 13)), birthdays: hide.people ? [] : birthdays, events: hide.admin ? [] : events, hidden: !!(hide.people || hide.admin) };
 }
 
 export function bulletinHtml(d, format = 'print') {
@@ -63,7 +65,7 @@ export function bulletinHtml(d, format = 'print') {
   const info = [s.worshipTimes && `<p class="times">${lines(s.worshipTimes)}</p>`, s.address && `<p>${esc(s.address)}</p>`, s.phone && `<p>☎ ${esc(s.phone)}</p>`, s.account && `<p>헌금 계좌 ${esc(s.account)}</p>`].filter(Boolean).join('');
   const head = `<header><p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="small">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)} · ${esc(w.name || '주일 예배')}</p></header>`;
   const left = `${head}${sec('예배 순서', orderHtml)}${sec('오늘의 말씀', sermon)}${sec('설교 요약', summary)}`;
-  const right = `${sec('교회 소식', ann)}${sec('섬기는 분들', serve)}${sec('다음 주 일정', events)}${sec('생일을 축하합니다', births)}${info ? `<section class="info">${info}</section>` : ''}`;
+  const right = `${d.hidden ? '<p class="small" style="color:#a33">🔒 잠금이 걸려 있어 생일·봉사·일정은 넣지 않았습니다. 잠금을 풀고 다시 열어 주세요.</p>' : ''}${sec('교회 소식', ann)}${sec('섬기는 분들', serve)}${sec('다음 주 일정', events)}${sec('생일을 축하합니다', births)}${info ? `<section class="info">${info}</section>` : ''}`;
   const title = `${church.name || '교회'} 주보 ${w.date}`;
   const css = `:root{--a:#2f5d50;--ink:#222;--muted:#666}*{box-sizing:border-box}body{margin:0;color:var(--ink);font:15px/1.6 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;background:#f3f1ec}
 header{text-align:center;border-bottom:2px solid var(--a);padding-bottom:8px;margin-bottom:10px}.church{font-size:1.5rem;font-weight:800;margin:0;color:var(--a)}.motto{margin:2px 0;font-weight:700}.date{margin:4px 0 0;color:var(--muted)}

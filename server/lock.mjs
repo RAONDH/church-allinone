@@ -1,6 +1,7 @@
 // 성도·재정·행정 잠금: 잠금 암호(숫자 4~8자리)를 넣어야 그 자료를 열 수 있다. 서버가 직접 막는다 (주소를 직접 쳐도 안 보임).
 // - 한 번 풀면 고른 곳이 모두 열리고, 정한 시간 동안 손대지 않으면 다시 잠긴다.
-// - 암호는 원문이 아니라 섞은 값(scrypt + 소금)만 저장한다. 5번 틀리면 30초 기다린다.
+// - 암호는 원문이 아니라 섞은 값(scrypt + 소금)만 저장한다. 5번 틀릴 때마다 기다리는 시간이 30초 → 1분 → 2분 … (최대 1시간)으로 늘고,
+//   틀린 기록은 자료 폴더(lock-fails.json)에 남겨 프로그램을 다시 켜도 초기화되지 않는다. 잠금 풀기와 설정 바꾸기 모두 같은 제한을 받는다.
 // - 암호를 잊으면: 자료 폴더에 '잠금풀기.txt' 를 만들고 프로그램을 다시 켜면 잠금이 풀린다 (그 컴퓨터를 직접 쓰는 사람만 가능).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,21 @@ const cleanPin = (pin) => { const p = String(pin ?? '').trim(); if (!/^\d{4,8}$/
 
 export function makeLock({ dataDir }) {
   const sessions = new Map();   // 쪽지(token) → 마지막으로 쓴 때
-  let fails = 0, waitUntil = 0;
+  // 틀린 기록: { fails, waitUntil, rounds } — 파일에 남겨 다시 켜도 이어진다
+  const failFile = path.join(dataDir, 'lock-fails.json');
+  let ft = (() => { try { return { fails: 0, waitUntil: 0, rounds: 0, ...JSON.parse(fs.readFileSync(failFile, 'utf8')) }; } catch { return { fails: 0, waitUntil: 0, rounds: 0 }; } })();
+  const saveFails = () => { try { fs.writeFileSync(failFile, JSON.stringify(ft)); } catch { /* 자료 폴더에 못 쓰면 메모리로만 */ } };
+  /** 모든 암호 확인이 여기를 거친다 (잠금 풀기·설정 바꾸기·끄기) */
+  function checkPin(l, pin, wrongMsg) {
+    if (Date.now() < ft.waitUntil) throw bad(`여러 번 틀려서 ${Math.ceil((ft.waitUntil - Date.now()) / 1000)}초 뒤에 다시 넣어 주세요.`, 429);
+    if (hashPin(String(pin ?? '').trim(), l.salt) !== l.hash) {
+      ft.fails++;
+      if (ft.fails >= 5) { ft.waitUntil = Date.now() + Math.min(3600e3, 30e3 * 2 ** ft.rounds); ft.rounds++; ft.fails = 0; }
+      saveFails();
+      throw bad(wrongMsg, 403);
+    }
+    if (ft.fails || ft.rounds) { ft = { fails: 0, waitUntil: 0, rounds: 0 }; saveFails(); }
+  }
   // 암호를 잊었을 때: 잠금풀기 파일이 있으면 켤 때 잠금을 없앤다
   const resetRequested = () => fs.existsSync(path.join(dataDir, RESET_FILE));
 
@@ -46,6 +61,8 @@ export function makeLock({ dataDir }) {
       const l = db.lock;
       return { enabled: !!l?.hash, areas: l?.areas || [], idleMin: l?.idleMin || 10, unlocked: !!l?.hash && alive(l, req, false), resetFile: RESET_FILE };
     },
+    /** 이 구역이 지금 열려 있는지 (잠금이 없거나, 그 구역을 잠그지 않았거나, 풀린 쪽지가 있음) — 주보처럼 일부만 가릴 때 */
+    isOpen(db, req, area) { const l = db.lock; return !l?.hash || !l.areas.includes(area) || alive(l, req, false); },
     /** 잠긴 구역이면 풀린 쪽지가 있어야 한다 (없으면 423) */
     guard(db, req, area) {
       const l = db.lock;
@@ -59,13 +76,7 @@ export function makeLock({ dataDir }) {
     unlock(db, pin, res) {
       const l = db.lock;
       if (!l?.hash) return { ok: true };
-      if (Date.now() < waitUntil) throw bad(`여러 번 틀려서 ${Math.ceil((waitUntil - Date.now()) / 1000)}초 뒤에 다시 넣어 주세요.`, 429);
-      if (hashPin(String(pin ?? '').trim(), l.salt) !== l.hash) {
-        fails++;
-        if (fails >= 5) { waitUntil = Date.now() + 30e3; fails = 0; }
-        throw bad('잠금 암호가 맞지 않습니다.', 403);
-      }
-      fails = 0;
+      checkPin(l, pin, '잠금 암호가 맞지 않습니다.');
       const t = crypto.randomBytes(24).toString('hex');
       sessions.set(t, Date.now());
       res.setHeader('Set-Cookie', `${COOKIE}=${t}; HttpOnly; SameSite=Strict; Path=/`);
@@ -75,7 +86,7 @@ export function makeLock({ dataDir }) {
     /** 잠금 켜기·바꾸기·끄기. 이미 켜져 있으면 지금 암호(current)가 맞아야 한다 */
     configure(db, b, res) {
       const l = db.lock;
-      if (l?.hash && hashPin(String(b.current ?? '').trim(), l.salt) !== l.hash) throw bad('지금 잠금 암호가 맞지 않습니다.', 403);
+      if (l?.hash) checkPin(l, b.current, '지금 잠금 암호가 맞지 않습니다.');
       if (b.enabled === false) { delete db.lock; sessions.clear(); return { enabled: false }; }
       const areas = [...new Set((Array.isArray(b.areas) ? b.areas : Object.keys(AREAS)).filter((a) => AREAS[a]))];
       if (!areas.length) throw bad('잠글 곳을 하나 이상 골라 주세요.');

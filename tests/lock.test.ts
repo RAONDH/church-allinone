@@ -41,6 +41,26 @@ describe('잠금', () => {
     expect(() => l.guard(db, req, 'finance')).toThrow(/잠겨 있습니다/);
     expect(() => l.guard(db, { headers: {} }, 'people')).not.toThrow();   // 잠그지 않은 구역
   });
+  it('틀릴 때마다 기다림이 30초 → 60초로 늘고, 프로그램을 다시 켜도 이어지며, 설정 바꾸기도 같은 제한을 받는다', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-19T10:00:00Z'));
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-lock-'));
+    try {
+      const db: any = {};
+      makeLock({ dataDir: d }).configure(db, { pin: '1234' }, fakeRes());
+      const wrong = (l: any) => { for (let i = 0; i < 5; i++) expect(() => l.unlock(db, '0000', fakeRes())).toThrow(); };
+      wrong(makeLock({ dataDir: d }));
+      const again = makeLock({ dataDir: d });   // 다시 켠 것과 같음
+      expect(() => again.unlock(db, '1234', fakeRes())).toThrow(/30초 뒤에/);
+      expect(() => again.configure(db, { enabled: false, current: '1234' }, fakeRes())).toThrow(/초 뒤에/);
+      vi.setSystemTime(new Date('2026-11-19T10:00:31Z'));
+      wrong(again);
+      expect(() => again.unlock(db, '1234', fakeRes())).toThrow(/60초 뒤에/);   // 두 번째는 두 배
+      vi.setSystemTime(new Date('2026-11-19T10:02:00Z'));
+      expect(again.unlock(db, '1234', fakeRes()).ok).toBe(true);   // 맞히면 기록을 지움
+      expect(JSON.parse(fs.readFileSync(path.join(d, 'lock-fails.json'), 'utf8'))).toEqual({ fails: 0, waitUntil: 0, rounds: 0 });
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
   it('암호를 잊으면: 자료 폴더에 잠금풀기 파일을 두고 다시 켜면 잠금이 풀린다', () => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-lock-'));
     try {

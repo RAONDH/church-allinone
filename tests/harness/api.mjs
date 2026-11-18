@@ -14,8 +14,9 @@ export async function runApi() {
   const appDir = tmpDir('fakeapp');
   const appsFile = path.join(appDir, 'apps.json');
   fs.writeFileSync(appsFile, JSON.stringify([
-    { id: 'fake', name: '가짜 프로그램', desc: '시험', icon: '🧪', color: '#000', port: fakeApp.port, dir: appDir, start: 'true' },
-    { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true' },
+    // 윈도우에서는 win 설정이 있는 프로그램만 보이므로 둘 다 넣는다
+    { id: 'fake', name: '가짜 프로그램', desc: '시험', icon: '🧪', color: '#000', port: fakeApp.port, dir: appDir, start: 'true', win: { dir: appDir, run: ['node', '-e', '0'] } },
+    { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true', win: { dir: path.join(appDir, 'nope'), run: ['node', '-e', '0'] } },
   ]));
   const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile } });
   const { get, post, put, del } = hub;
@@ -345,20 +346,14 @@ export async function runApi() {
         eq((await fx('GET', `${S}/people`)).status, 200, '예제는 잠그지 않음');
         eq((await fx('GET', `${R}/people`, null, on.cookie)).status, 200, '켠 사람은 바로 열린 상태');
       }],
-      ['잠금: 틀린 암호는 거절하고 5번 틀리면 기다리게 하며, 맞으면 열리고 잠그기로 다시 잠긴다', async () => {
+      ['잠금: 틀린 암호는 거절하고, 맞으면 열리고, 잠그기로 다시 잠긴다', async () => {
         const { fx } = ctx;
         eq((await fx('POST', `${R}/lock/unlock`, { pin: '0000' })).status, 403, '틀린 암호');
-        for (let i = 0; i < 4; i++) await fx('POST', `${R}/lock/unlock`, { pin: '0000' });
-        const wait = await fx('POST', `${R}/lock/unlock`, { pin: '2468' });
-        eq(wait.status, 429, '5번 틀린 뒤에는 맞는 암호도 잠시 기다림');
-        has(wait.data.error, '초 뒤에', '기다리라는 안내');
-        // 시험에서는 기다리지 않고 잠금을 다시 켠 쪽지로 확인 (켠 사람 쪽지는 바로 열림)
-        const re = await fx('PUT', `${R}/lock`, { current: '2468', areas: ['people', 'finance', 'admin'], idleMin: 10 });
-        eq(re.status, 200, '지금 암호로 설정 저장');
-        eq((await fx('GET', `${R}/finance`, null, re.cookie)).status, 200, '풀린 쪽지로 재정 열림');
-        await fx('POST', `${R}/lock/lock`, {}, re.cookie);
-        eq((await fx('GET', `${R}/finance`, null, re.cookie)).status, 423, '잠그기 뒤에는 같은 쪽지로도 잠김');
-        ctx.cookie = re.cookie;
+        const un = await fx('POST', `${R}/lock/unlock`, { pin: '2468' });
+        eq(un.status, 200, '맞는 암호');
+        eq((await fx('GET', `${R}/finance`, null, un.cookie)).status, 200, '풀린 쪽지로 재정 열림');
+        await fx('POST', `${R}/lock/lock`, {}, un.cookie);
+        eq((await fx('GET', `${R}/finance`, null, un.cookie)).status, 423, '잠그기 뒤에는 같은 쪽지로도 잠김');
       }],
       ['잠금: 바꾸거나 끄려면 지금 암호가 필요하고, 끄면 다시 모두 보인다', async () => {
         const { fx } = ctx;
@@ -367,6 +362,31 @@ export async function runApi() {
         eq((await fx('PUT', `${R}/lock`, { enabled: false, current: '2468' })).status, 200, '지금 암호로 끄기');
         eq((await fx('GET', `${R}/people`)).status, 200, '끈 뒤 성도 자료');
         eq((await get(`${R}/lock`)).data.enabled, false, '잠금 상태');
+      }],
+      ['잠금 중 주보: 봉사자 이름·생일·일정은 빼고, 주보 칸 설정도 바꿀 수 없다', async () => {
+        const { fx } = ctx;
+        await put(`${R}/bulletin`, { showBirthdays: true });
+        await put('/api/ws/real/serve/plan', { dates: { [today]: { d1: ['잠금시험봉사자'] } } });
+        has((await get(`${R}/weeks/${ctx.week}/bulletin`)).data, '잠금시험봉사자', '잠금 전에는 봉사자 이름이 보임');
+        const on = await fx('PUT', `${R}/lock`, { pin: '1357', areas: ['people', 'admin'], idleMin: 10 });
+        eq(on.status, 200, '잠금 다시 켜기');
+        ctx.lockCookie = on.cookie;
+        const locked = (await get(`${R}/weeks/${ctx.week}/bulletin`)).data;
+        ok(!locked.includes('잠금시험봉사자') && !locked.includes('섬기는 분들'), '잠긴 동안 주보에 봉사자 이름이 없어야 함');
+        has(locked, '잠금이 걸려 있어', '빠진 까닭 안내');
+        const open = await fetch(`${hub.base}${R}/weeks/${ctx.week}/bulletin`, { headers: { Cookie: on.cookie } }).then((x) => x.text());
+        has(open, '잠금시험봉사자', '잠금을 푼 쪽지로는 봉사자 이름이 보임');
+        eq((await fx('PUT', `${R}/bulletin`, { showBirthdays: true })).status, 423, '잠긴 동안 주보 칸 바꾸기');
+      }],
+      ['잠금: 5번 틀리면 기다려야 하고, 그동안은 설정 바꾸기·끄기도 막힌다 (암호 맞히기 막기)', async () => {
+        const { fx } = ctx;
+        for (let i = 0; i < 5; i++) await fx('POST', `${R}/lock/unlock`, { pin: '0000' });
+        const wait = await fx('POST', `${R}/lock/unlock`, { pin: '1357' });
+        eq(wait.status, 429, '5번 틀린 뒤에는 맞는 암호도 기다림');
+        has(wait.data.error, '초 뒤에', '기다리라는 안내');
+        eq((await fx('PUT', `${R}/lock`, { enabled: false, current: '1357' })).status, 429, '기다리는 동안 맞는 암호로 끄기');
+        eq((await fx('PUT', `${R}/lock`, { current: '9999', pin: '1111' })).status, 429, '기다리는 동안 설정 바꾸기');
+        ok(fs.existsSync(path.join(hub.dataDir, 'lock-fails.json')), '틀린 기록이 파일에 남아 다시 켜도 이어짐');
       }],
       ['예제: 처음 상태로 되돌리면 바꾼 것이 사라진다 (실제 자료는 그대로)', async () => {
         expectStatus(await post(`${S}/reset`, {}), 200, '예제 되돌리기');

@@ -13,6 +13,8 @@ const EXTRA = WIN
 export const CLI_PATH = [...EXTRA, ...(process.env.PATH || '').split(path.delimiter)].filter(Boolean).join(path.delimiter);
 
 function findWin(cmd) {
+  // 전체 경로를 받았으면 그 파일 그대로 (확장자가 빠졌으면 붙여 봄)
+  if (path.isAbsolute(cmd)) { for (const f of [cmd, cmd + '.exe', cmd + '.cmd']) if (fs.existsSync(f)) return f; return null; }
   for (const dir of CLI_PATH.split(';')) {
     for (const ext of ['.exe', '.cmd', '.bat']) {
       const f = path.join(dir, cmd + ext);

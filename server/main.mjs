@@ -441,6 +441,7 @@ async function api(req, res, url) {
 
   // 주보: 고정 정보(주소·예배 시간·계좌·표어)와 보일 칸 고르기, 인쇄용·휴대폰 주보 만들기
   if (sub === '/bulletin' && req.method === 'GET') return send(res, 200, { ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) });
+  if (sub === '/bulletin' && req.method === 'PUT' && r[1] === 'real') await wrapB(() => lock.guardAny(db, req));   // 잠금 중에는 주보 칸(생일 등)을 켜지 못하게
   if (sub === '/bulletin' && req.method === 'PUT') { db.bulletin = cleanBulletinSettings(await body(req)); await sp.store.save(); return send(res, 200, db.bulletin); }
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
     const w = getWeek(sp, q[1]);
@@ -450,7 +451,8 @@ async function api(req, res, url) {
     const format = url.searchParams.get('format') === 'mobile' ? 'mobile' : 'print';
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
     if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date}.html`)}`;
-    res.writeHead(200, headers); res.end(bulletinHtml(bulletinData({ db, week: w, order }), format)); return;
+    res.writeHead(200, headers); const hide = r[1] === 'real' ? { people: !lock.isOpen(db, req, 'people'), admin: !lock.isOpen(db, req, 'admin') } : {};
+    res.end(bulletinHtml(bulletinData({ db, week: w, order, hide }), format)); return;
   }
 
   // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 라온 교회 올인원)

@@ -51,7 +51,9 @@ console.log('\n▶ 단위·통합 점검 (vitest)');
       all.push({ name, ok: okd, error: (t.failureMessages || []).join('\n') });
       console.log(`${okd ? '  ✓' : '  ✗'} ${name}${okd ? '' : `\n      ${(t.failureMessages || []).join('\n').split('\n').slice(0, 8).join('\n      ')}`}`);
     }
-    if (!j.testResults.length || j.numFailedTestSuites) all.push({ name: 'vitest: 점검 파일을 모두 읽었다', ok: !j.numFailedTestSuites && !!j.testResults.length, error: j.testResults.filter((f) => f.status === 'failed').map((f) => `${f.name}: ${f.message}`).join('\n') });
+    // 파일 자체를 읽지 못한 경우만 따로 센다 (실패한 점검이 든 파일은 위에서 이미 셈)
+    const unread = j.testResults.filter((f) => f.status === 'failed' && !f.assertionResults.length);
+    if (!j.testResults.length || unread.length) all.push({ name: 'vitest: 점검 파일을 모두 읽었다', ok: false, error: unread.map((f) => `${f.name}: ${f.message}`).join('\n') || '점검 파일이 하나도 없습니다' });
   } catch (e) { all.push({ name: 'vitest 실행', ok: false, error: `${e.message}\n${r.stdout}${r.stderr}`.slice(0, 2000) }); console.log(`  ✗ vitest 실행\n      ${r.stderr.slice(0, 500)}`); }
   fs.rmSync(out, { force: true });
 }

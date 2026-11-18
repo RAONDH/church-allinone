@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HUB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const KEY = process.env.ALLINONE_SIGNING_KEY || path.join(os.homedir(), '.raon-workspace', 'signing', 'church-allinone-update.key');
@@ -16,7 +16,7 @@ const KEYS_FILE = path.join(HUB, 'server', 'update-keys.mjs');
 const [cmd, arg] = process.argv.slice(2);
 const die = (m) => { console.error(`✗ ${m}`); process.exit(1); };
 
-async function trusted() { return (await import(`${KEYS_FILE}?t=${Date.now()}`)).TRUSTED_KEYS; }
+async function trusted() { return (await import(`${pathToFileURL(KEYS_FILE).href}?t=${Date.now()}`)).TRUSTED_KEYS; }   // 윈도우 경로(C:\…)도 되게 파일 주소로
 const pubOf = (k) => (k.type === 'public' ? k : crypto.createPublicKey(k)).export({ type: 'spki', format: 'der' }).toString('base64');
 
 if (cmd === 'keygen') {
@@ -47,7 +47,7 @@ if (cmd === 'keygen') {
   console.log(`✓ 서명: ${sums}.sig`);
 } else if (cmd === 'verify') {
   const sums = path.join(arg || '.', 'SHA256SUMS.txt');
-  const { verifySums } = await import(path.join(HUB, 'server', 'update.mjs'));
+  const { verifySums } = await import(pathToFileURL(path.join(HUB, 'server', 'update.mjs')).href);
   const ok = verifySums(fs.readFileSync(sums), fs.readFileSync(`${sums}.sig`, 'utf8'));
   if (!ok) die('서명이 프로그램에 든 공개 열쇠와 맞지 않습니다');
   console.log('✓ 서명이 맞습니다');
