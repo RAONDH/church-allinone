@@ -233,6 +233,84 @@ export async function runApi() {
         eq(p.attendance[today], [ctx.lee], '출석에서 빠짐');
         ok(Object.values(a.serve.plan[today]).flat().includes('김시험'), '봉사표에는 이름 글자로', a.serve.plan[today]);
       }],
+      ['녹음 조각: 30초 조각을 순서대로 이어 붙이고, 같은 조각을 다시 보내도 한 번만, 순서가 틀리면 거절', async () => {
+        const m = (await post(`${R}/minutes`, { date: today, meeting: '당회', title: '조각 시험' })).data.item;
+        ctx.recM = m.id;
+        const piece = (sec) => Buffer.alloc(32000 * sec, 1);   // 16kHz·16비트·모노 = 1초에 32000바이트
+        eq((await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=0`, piece(2))).data.recording.seconds, 2, '첫 조각 뒤 저장 길이(초)');
+        eq((await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=0`, piece(2))).data.duplicate, true, '같은 조각 다시 보냄');
+        expectStatus(await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=5`, piece(1)), 409, '순서가 건너뛴 조각');
+        expectStatus(await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=1`, Buffer.alloc(3)), 400, '홀수 바이트 조각');
+        eq((await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=1`, piece(3))).data.recording.seconds, 5, '두 조각 뒤 저장 길이(초)');
+        eq((await get(`${R}/admin`)).data.minutes.find((x) => x.id === m.id).recording.seconds, 5, '창이 닫혀도 회의록에 남은 저장 길이');
+      }],
+      ['녹음 마무리: 이어 붙인 조각이 재생되는 wav 가 되고, 녹음 중 표시는 사라진다', async () => {
+        const r = expectStatus(await post(`${R}/minutes/${ctx.recM}/rec/finish`, {}), 200, '마무리');
+        eq([r.seconds, r.audio.size], [5, 5 * 32000 + 44], '녹음 길이·파일 크기');
+        const wav = await fetch(`${hub.base}${R}/minutes/${ctx.recM}/audio`).then((x) => x.arrayBuffer()).then((b) => Buffer.from(b));
+        eq([wav.toString('ascii', 0, 4), wav.toString('ascii', 8, 12), wav.readUInt32LE(24), wav.readUInt32LE(40)], ['RIFF', 'WAVE', 16000, 160000], 'wav 머리 (16kHz, 소리 길이)');
+        const m = (await get(`${R}/admin`)).data.minutes.find((x) => x.id === ctx.recM);
+        eq([!!m.recording, m.audio?.name.endsWith('녹음.wav')], [false, true], '녹음 중 표시·녹음 파일');
+        expectStatus(await post(`${R}/minutes/${ctx.recM}/rec/finish`, {}), 400, '저장된 조각이 없으면 마무리 거절');
+      }],
+      ['회의록 지우기: 녹음하던 조각 파일도 함께 지운다', async () => {
+        const m = (await post(`${R}/minutes`, { date: today, meeting: '당회', title: '지울 녹음' })).data.item;
+        await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=0`, Buffer.alloc(32000, 1));
+        const pcm = path.join(hub.dataDir, 'recordings', 'real', `${m.id}.rec.pcm`);
+        ok(fs.existsSync(pcm), '조각 파일이 있어야 함');
+        await del(`${R}/minutes/${m.id}`);
+        ok(!fs.existsSync(pcm), '지운 뒤 조각 파일이 없어야 함');
+      }],
+      ['백업: 바깥 폴더를 정하면 바로 백업하고, 백업 파일(zip)을 받고, 날짜 백업으로 되살린다', async () => {
+        const ext = tmpDir('ext-backup');
+        try {
+          expectStatus(await put('/api/backup/settings', { dir: 'relative/path' }), 400, '상대 경로 거절');
+          const v = expectStatus(await put('/api/backup/settings', { dir: ext }), 200, '바깥 폴더 정하기');
+          eq([v.dir, v.result.ok, v.lastError], [ext, true, ''], '정한 뒤 상태');
+          ok(fs.readdirSync(path.join(ext, '라온교회올인원-백업')).some((f) => /^real-\d{4}-\d{2}-\d{2}\.json$/.test(f)), '바깥 폴더에 자료 백업');
+          ok(fs.existsSync(path.join(ext, '라온교회올인원-백업', 'recordings', `${ctx.recM}.wav`)), '바깥 폴더에 녹음');
+          const z = await fetch(`${hub.base}/api/backup/download`);
+          eq([z.status, z.headers.get('content-type')], [200, 'application/zip'], '백업 파일 받기');
+          const zip = Buffer.from(await z.arrayBuffer());
+          eq(zip.readUInt32LE(0), 0x04034b50, 'zip 모양');
+          const local = (await get('/api/backup')).data.local.find((b) => b.file.startsWith('real-'));
+          ok(local, '이 컴퓨터 안 날짜 백업', (await get('/api/backup')).data.local);
+          const before = (await get(R)).data.church.name;
+          const r = expectStatus(await post('/api/backup/restore-local', { file: local.file }), 200, '날짜 백업으로 되살리기');
+          ok(r.kept.startsWith('before-restore-'), '되살리기 직전 자료를 남김', r);
+          expectStatus(await post('/api/backup/restore-local', { file: '../../etc/passwd' }), 404, '백업 폴더 밖 파일 거절');
+          // 받은 zip 으로 다시 되살리면 원래대로
+          const r2 = expectStatus(await hub.postRaw('/api/backup/restore', zip, { 'X-File-Name': 'backup.zip' }), 200, 'zip 으로 되살리기');
+          eq(r2.church, before, '되살린 교회 이름');
+          expectStatus(await hub.postRaw('/api/backup/restore', Buffer.from('{"a":1}'), { 'X-File-Name': 'x.json' }), 400, '올인원 자료가 아닌 파일 거절');
+          const noName = await hub.postRaw('/api/backup/restore', zip, {});
+          eq(noName.status, 400, '파일 이름 머리글 없는 되살리기 거절 (다른 곳에서 몰래 보내기 막기)');
+          eq((await get(R)).data.church.name, before, '거절한 뒤 자료 그대로');
+          await put('/api/backup/settings', { dir: '' });
+        } finally { fs.rmSync(ext, { recursive: true, force: true }); }
+      }],
+      ['주보: 고정 정보와 이번 주 자료(예배 순서·본문·광고·봉사·일정)가 들어가고, 생일은 켰을 때만 나온다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        eq((await get(`${S}/bulletin`)).data.showBirthdays, false, '생일은 처음에 꺼져 있음');
+        await put(`${S}/bulletin`, { address: '시험시 시험로 1', worshipTimes: '주일 예배 오전 11시', account: '시험은행 1-2-3', motto: '시험 표어' });
+        const html = expectStatus(await get(`${S}/weeks/${wk.id}/bulletin?format=print`), 200, '인쇄용 주보');
+        for (const t of ['예제교회', '시험 표어', '예배 순서', '시편 23', '교회 소식', '섬기는 분들', '시험시 시험로 1', '주일 예배 오전 11시', '시험은행 1-2-3']) has(html, t, `주보에 "${t}"`);
+        ok(!html.includes('생일을 축하합니다'), '생일 칸이 없어야 함');
+        ok(!/목사 목사/.test(html), '목사 호칭이 겹치지 않아야 함');
+        await put(`${S}/bulletin`, { ...(await get(`${S}/bulletin`)).data, showBirthdays: true, showServe: false });
+        const h2 = (await get(`${S}/weeks/${wk.id}/bulletin?format=mobile&download=1`));
+        has(h2.data, '생일을 축하합니다', '생일을 켜면 생일 칸');
+        ok(!h2.data.includes('섬기는 분들'), '봉사 칸을 끄면 없어야 함');
+        has(h2.headers.get('content-disposition'), 'attachment', '휴대폰 주보는 파일로 받기');
+        has(h2.data, 'name="viewport"', '휴대폰 화면 맞춤');
+      }],
+      ['주보: 적은 글에 태그가 있어도 실행되지 않고 글자로 나온다 (보안)', async () => {
+        await put(`${R}/weeks/${ctx.week}`, { announcements: ['<script>alert(1)</script>', '<img src=x onerror=alert(1)>'] });
+        const r = await get(`${R}/weeks/${ctx.week}/bulletin`);
+        ok(!r.data.includes('<script>alert') && !r.data.includes('<img src=x'), '태그가 그대로 들어가면 안 됨');
+        has(r.data, '&lt;script&gt;alert(1)&lt;/script&gt;', '글자로 바뀐 태그');
+        has(r.headers.get('content-security-policy'), "default-src 'none'", '주보 보안 머리글');
+      }],
       ['프로그램 목록: 설치·켜짐 상태를 보여 준다 (가짜 프로그램)', async () => {
         const apps = (await get('/api/apps')).data;
         eq(apps.map((a) => [a.id, a.installed, a.running]), [['fake', true, true], ['gone', false, false]], '프로그램 상태');
@@ -250,6 +328,45 @@ export async function runApi() {
       ['자동 백업: 저장하면 backups 폴더에 오늘 백업이 생긴다', async () => {
         const files = fs.readdirSync(path.join(hub.dataDir, 'backups'));
         ok(files.some((f) => f.startsWith('real-')), 'real 백업 파일', files);
+      }],
+      ['잠금: 켜면 성도·재정·행정 자료는 암호 없이 안 보이고(주소를 직접 쳐도), 예배 자료와 예제는 그대로 보인다', async () => {
+        const fx = async (method, p, body, cookie = '') => { const r = await fetch(hub.base + p, { method, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, data: await r.json().catch(() => null), cookie: (r.headers.get('set-cookie') || '').split(';')[0] }; };
+        const on = await fx('PUT', `${R}/lock`, { pin: '2468', areas: ['people', 'finance', 'admin'], idleMin: 10 });
+        eq(on.status, 200, '잠금 켜기');
+        ctx.fx = fx;
+        for (const p of ['/people', '/people/export.csv', '/finance', '/finance/export.csv', '/admin', '/events.ics']) eq((await fx('GET', `${R}${p}`)).status, 423, `암호 없이 ${p}`);
+        eq((await fx('POST', `${R}/members`, { name: '몰래' })).status, 423, '암호 없이 성도 추가');
+        eq((await fx('GET', '/api/backup/download')).status, 423, '암호 없이 백업 파일 받기');
+        eq((await fx('PUT', '/api/backup/settings', { dir: '/tmp' })).status, 423, '암호 없이 바깥 백업 폴더 바꾸기');
+        eq((await fx('POST', '/api/backup/now', {})).status, 423, '암호 없이 지금 백업');
+        eq((await fx('POST', '/api/backup/restore-local', { file: 'x.json' })).status, 423, '암호 없이 날짜 백업으로 되살리기');
+        eq((await fx('GET', '/api/backup')).status, 200, '백업 상태 보기는 됨');
+        eq((await fx('GET', `${R}/weeks/${ctx.week}`)).status, 200, '예배 자료는 그대로');
+        eq((await fx('GET', `${S}/people`)).status, 200, '예제는 잠그지 않음');
+        eq((await fx('GET', `${R}/people`, null, on.cookie)).status, 200, '켠 사람은 바로 열린 상태');
+      }],
+      ['잠금: 틀린 암호는 거절하고 5번 틀리면 기다리게 하며, 맞으면 열리고 잠그기로 다시 잠긴다', async () => {
+        const { fx } = ctx;
+        eq((await fx('POST', `${R}/lock/unlock`, { pin: '0000' })).status, 403, '틀린 암호');
+        for (let i = 0; i < 4; i++) await fx('POST', `${R}/lock/unlock`, { pin: '0000' });
+        const wait = await fx('POST', `${R}/lock/unlock`, { pin: '2468' });
+        eq(wait.status, 429, '5번 틀린 뒤에는 맞는 암호도 잠시 기다림');
+        has(wait.data.error, '초 뒤에', '기다리라는 안내');
+        // 시험에서는 기다리지 않고 잠금을 다시 켠 쪽지로 확인 (켠 사람 쪽지는 바로 열림)
+        const re = await fx('PUT', `${R}/lock`, { current: '2468', areas: ['people', 'finance', 'admin'], idleMin: 10 });
+        eq(re.status, 200, '지금 암호로 설정 저장');
+        eq((await fx('GET', `${R}/finance`, null, re.cookie)).status, 200, '풀린 쪽지로 재정 열림');
+        await fx('POST', `${R}/lock/lock`, {}, re.cookie);
+        eq((await fx('GET', `${R}/finance`, null, re.cookie)).status, 423, '잠그기 뒤에는 같은 쪽지로도 잠김');
+        ctx.cookie = re.cookie;
+      }],
+      ['잠금: 바꾸거나 끄려면 지금 암호가 필요하고, 끄면 다시 모두 보인다', async () => {
+        const { fx } = ctx;
+        eq((await fx('PUT', `${R}/lock`, { enabled: false })).status, 403, '지금 암호 없이 끄기');
+        eq((await fx('PUT', `${R}/lock`, { enabled: false, current: '1111' })).status, 403, '틀린 암호로 끄기');
+        eq((await fx('PUT', `${R}/lock`, { enabled: false, current: '2468' })).status, 200, '지금 암호로 끄기');
+        eq((await fx('GET', `${R}/people`)).status, 200, '끈 뒤 성도 자료');
+        eq((await get(`${R}/lock`)).data.enabled, false, '잠금 상태');
       }],
       ['예제: 처음 상태로 되돌리면 바꾼 것이 사라진다 (실제 자료는 그대로)', async () => {
         expectStatus(await post(`${S}/reset`, {}), 200, '예제 되돌리기');

@@ -8,6 +8,7 @@ import { StepList } from './Home';
 import AfterTab from './AfterTab';
 import { docText } from '../lib/docText';
 import { setBusy } from '../lib/busy';
+import BulletinCard from './Bulletin';
 
 const TABS = [['info', '예배 정보'], ['setlist', '찬양 콘티'], ['subs', '자막'], ['outputs', '결과물'], ['after', '설교 후 자료']] as const;
 const EDITABLE = ['date', 'name', 'passage', 'sermonTitle', 'announcements', 'sermonNotes', 'sermonVideoUrl', 'prayerLeader'] as const;
@@ -529,6 +530,7 @@ function OutputsTab({ week, status, steps }: { week: Week; status: WeekStatus | 
           </div>
         </div>
         <div className="col">
+          <BulletinCard week={week} />
           <div className="card">
             <h2>자막 확정본</h2>
             {week.final ? (

@@ -1,0 +1,29 @@
+# 전체 점검을 윈도우·맥 컴퓨터에서 돌린다 (공개 저장소라 GitHub Actions 무료)
+# 윈도우에서는 묶음 실행 시험(tests/win-smoke.mjs)도 돈다: 실행 파일로 켜기 · HWP 변환기 · 설교 쇼츠 메이커 설치 위치
+name: 전체 점검 (윈도우·맥)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: 전체 점검 (npm run verify)
+        run: npm run verify
+      - name: 윈도우 묶음 실행 시험
+        if: runner.os == 'Windows'
+        run: node tests/win-smoke.mjs
+        env:
+          GH_TOKEN: ${{ github.token }}

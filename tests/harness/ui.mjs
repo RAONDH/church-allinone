@@ -35,8 +35,20 @@ export async function runUi() {
   const hub = await startHub({ name: 'ui', env: { UPDATE_LATEST_URL: `${gh.base}/latest` } });
   const files = tmpDir('ui-files');
   const profile = tmpDir('ui-profile');   // 사용자의 크롬 프로필과 섞이지 않게
-  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`] });
+  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
+    '--autoplay-policy=no-user-gesture-required',
+    // 이 컴퓨터의 소리 장치 상태와 관계없이 소리 처리가 돌게 (시험용 가짜 오디오 출력)
+    '--disable-audio-output'] });
   const page = await browser.newPage();
+  // 마이크 대신 크롬 안에서 만든 소리(발진음)를 넣는다. 맥의 실제 마이크·권한 창은 점검으로 확인할 수 없어 건너뜀
+  await page.evaluateOnNewDocument(() => {
+    if (!navigator.mediaDevices) return;
+    navigator.mediaDevices.getUserMedia = async () => {
+      const ctx = new AudioContext(); const osc = ctx.createOscillator(); const dst = ctx.createMediaStreamDestination();
+      osc.frequency.value = 440; osc.connect(dst); osc.start(); await ctx.resume();
+      return dst.stream;
+    };
+  });
   await page.setViewport({ width: 1280, height: 900 });
   let errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
@@ -185,6 +197,93 @@ export async function runUi() {
         await sleep(500);
         eq((await hub.get('/api/update')).data.notify, false, '서버에 저장된 알림 설정');
         noErrors('설정');
+      }],
+      ['설정 → 백업: 바깥 백업 폴더를 적어 정하면 바로 백업하고 날짜 백업 목록이 보인다', async () => {
+        const ext = tmpDir('ui-ext');
+        try {
+          await go('/settings?ws=real');
+          await waitText('바깥 백업 폴더');
+          const input = await page.$('input[aria-label="바깥 백업 폴더"]');
+          await input.click({ clickCount: 3 }); await input.type(ext);
+          await clickText('폴더 정하기');
+          await waitText('바깥 백업 폴더를 정하고 지금 한 번 백업했습니다');
+          ok(fs.existsSync(path.join(ext, '라온교회올인원-백업')), '바깥 폴더에 백업 폴더가 생겨야 함');
+          await waitText('이 컴퓨터 안의 백업');
+          ok(await page.$('a[href="/api/backup/download"]'), '백업 파일 받기 단추');
+          await clickText('끄기'); await waitText('바깥 백업을 껐습니다');
+          noErrors('백업 설정');
+        } finally { fs.rmSync(ext, { recursive: true, force: true }); }
+      }],
+      ['회의록 녹음(마이크 대신 시험 소리): 녹음하는 동안 30초마다 저장되고, 녹음 끝내기를 누르면 녹음 파일이 생긴다', async () => {
+        // 앞 점검이 연 탭 뒤에 숨어 있으면 크롬이 소리 처리를 멈추므로, 녹음할 탭을 앞으로
+        await page.bringToFront();
+        await go('/admin/minutes?ws=real');
+        await clickText('녹음으로 회의록 만들기');
+        // 실제 사람처럼 마우스로 누른다 (스크립트로 누르면 크롬이 오디오를 멈춘 채로 둘 수 있음)
+        const recBtn = await page.waitForSelector('button.rec-choice');
+        await recBtn.click();
+        await waitText('녹음 중입니다');
+        const findRec = async () => (await hub.get('/api/ws/real/admin')).data.minutes.find((m) => m.recording);
+        ok(await findRec(), '녹음을 시작하면 회의록이 먼저 생겨야 함');
+        await page.waitForFunction(() => /저장됨\)/.test(document.body.innerText), { timeout: 45000 }).catch(async () => {
+          const dlg = await page.evaluate(() => (document.querySelector('.dialog')?.innerText || '').replace(/\s+/g, ' ').slice(0, 300));
+          const srv = (await hub.get('/api/ws/real/admin')).data.minutes.find((m) => m.recording)?.recording;
+          throw new Error(`30초가 지나도 "저장됨"이 나오지 않았습니다\n      창: ${dlg}\n      서버 녹음 상태: ${JSON.stringify(srv)}\n      화면 오류: ${errors.slice(0, 3).join(' | ')}`);
+        });
+        const mid = await findRec();
+        ok(mid.recording.seconds >= 20, '녹음 중 서버에 저장된 길이(초)', mid.recording);
+        await clickText('녹음 끝내기');
+        await waitText('녹음 파일을 회의록에 저장했습니다', 20000);
+        const done = (await hub.get('/api/ws/real/admin')).data.minutes.find((m) => m.id === mid.id);
+        ok(done.audio && done.audio.size > mid.recording.bytes && !done.recording, '녹음 파일 (끝낸 뒤 조각까지 합쳐짐)', { audio: done.audio, rec: done.recording });
+        noErrors('회의록 녹음');
+      }],
+      ['주보(예제): 결과물 탭에서 인쇄용 주보를 열 수 있고, A4 가로 한 장으로 인쇄된다', async () => {
+        const wk = await sampleWeek();
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await waitText('인쇄용 주보 열기');
+        await clickText('주보 고정 정보');
+        await typeLabel('교회 주소', '화면시험 주소 1');
+        await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.includes('저장'))?.click());
+        await page.waitForFunction(() => !document.querySelector('.dialog'));
+        const href = await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.innerText.includes('인쇄용 주보 열기'))?.getAttribute('href'));
+        const p2 = await browser.newPage();
+        const errs = []; p2.on('pageerror', (e) => errs.push(String(e.message)));
+        await p2.goto(U(href), { waitUntil: 'load' });
+        has(await p2.evaluate(() => document.body.innerText), '화면시험 주소 1', '저장한 고정 정보');
+        const pdf = Buffer.from(await p2.pdf({ format: 'A4', landscape: true, preferCSSPageSize: true, printBackground: true }));
+        await p2.close();
+        const pages = (pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+        eq(pages, 1, 'A4 가로 인쇄 쪽수');
+        eq(errs, [], '주보 화면 오류');
+        noErrors('주보');
+      }],
+      ['잠금: 설정에서 켜고 🔒 잠그기를 누르면 성도·재정이 잠금 화면이 되고, 암호를 넣으면 열린다', async () => {
+        await go('/settings?ws=real');
+        await waitText('잠금 (성도·재정·행정)');
+        const set = async (label, v) => { const el = await page.$(`input[aria-label="${label}"]`); await el.click({ clickCount: 3 }); await el.type(v); };
+        await set('새 잠금 암호', '1357'); await set('새 잠금 암호 확인', '1357');
+        await clickText('잠금 켜기');
+        await waitText('잠금을 켰습니다');
+        await clickText('🔒 잠그기');
+        await go('/people?ws=real');
+        await waitText('성도 자료는 잠겨 있습니다');
+        await go('/finance?ws=real');
+        await waitText('재정 자료는 잠겨 있습니다');
+        const pin = await page.$('input[aria-label="잠금 암호"]');
+        await pin.type('9999'); await clickText('열기');
+        await waitText('잠금 암호가 맞지 않습니다');
+        await pin.type('1357'); await clickText('열기');
+        await waitText('수입·지출 입력');
+        await go('/people?ws=real');
+        await waitText('성도 추가');   // 한 번 풀면 성도도 열림
+        // 끄기 (다른 점검에 영향 없게)
+        await go('/settings?ws=real');
+        await set('지금 잠금 암호', '1357');
+        await clickText('잠금 끄기');
+        await waitText('잠금을 껐습니다');
+        errors = errors.filter((e) => !/status of 4(23|03)/.test(e));   // 잠긴 자료를 부를 때 나오는 423·403 은 정상
+        noErrors('잠금');
       }],
       ['모든 화면이 오류 없이 열린다 (위 메뉴 · 예배 탭 · 성도·재정·행정 탭)', async () => {
         const wk = await sampleWeek();

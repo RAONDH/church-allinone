@@ -10,6 +10,8 @@ import People from './pages/People';
 import Finance from './pages/Finance';
 import Admin from './pages/Admin';
 import { UpdateBell, UpdateDialog, useUpdate, type UpdateView } from './pages/Update';
+import BackupCard from './pages/BackupCard';
+import { LockButton, LockGate, LockProvider, LockSettings } from './pages/Lock';
 
 interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () => Promise<void>; base: string; loadError: string; upd: UpdateView | null; setUpd: (v: UpdateView) => void; reloadUpd: (force?: boolean) => Promise<UpdateView | null> }
 const C = createContext<Ctx>(null as any);
@@ -38,6 +40,7 @@ export default function App() {
 
   return (
     <C.Provider value={{ ws, setWs, ov, reload, base, loadError, upd: update.u, setUpd: update.setU, reloadUpd: update.load }}>
+     <LockProvider>
       {ws === 'sample' && (
         <div className="sample-banner">
           <b>예제 자료를 보고 있습니다.</b> 여기서 바꾼 내용은 실제 교회 자료·실제 예배송출에 영향을 주지 않습니다.
@@ -56,6 +59,7 @@ export default function App() {
           <NavLink to="/settings">설정</NavLink>
           <NavLink to="/guide">사용설명서</NavLink>
         </nav>
+        <LockButton />
         <UpdateBell u={update.u} onOpen={() => update.setOpen(true)} />
         <div className="ws-toggle" role="group" aria-label="자료 선택">
           <button className={ws === 'real' ? 'on' : ''} onClick={() => setWs('real')}>우리 교회</button>
@@ -71,12 +75,12 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/week/:id" element={<WeekPage />} />
               <Route path="/week/:id/:tab" element={<WeekPage />} />
-              <Route path="/people" element={<People />} />
-              <Route path="/people/:tab" element={<People />} />
-              <Route path="/finance" element={<Finance />} />
-              <Route path="/finance/:tab" element={<Finance />} />
-              <Route path="/admin" element={<Admin />} />
-              <Route path="/admin/:tab" element={<Admin />} />
+              <Route path="/people" element={<LockGate area="people"><People /></LockGate>} />
+              <Route path="/people/:tab" element={<LockGate area="people"><People /></LockGate>} />
+              <Route path="/finance" element={<LockGate area="finance"><Finance /></LockGate>} />
+              <Route path="/finance/:tab" element={<LockGate area="finance"><Finance /></LockGate>} />
+              <Route path="/admin" element={<LockGate area="admin"><Admin /></LockGate>} />
+              <Route path="/admin/:tab" element={<LockGate area="admin"><Admin /></LockGate>} />
               <Route path="/songs" element={<Songs />} />
               <Route path="/apps" element={<Apps />} />
               <Route path="/settings" element={<Settings />} />
@@ -89,6 +93,7 @@ export default function App() {
       <footer className="site-foot">
         라온 교회 올인원은 무료로 쓰실 수 있습니다. <NavLink to="/settings#support">후원 안내</NavLink> · <a href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">카카오 오픈채팅 문의</a>
       </footer>
+     </LockProvider>
     </C.Provider>
   );
 }
@@ -206,6 +211,8 @@ export function Settings() {
           <li>⚠️ 찬양곡 추천(PraiseFlow), 가사 인터넷 검색, 쇼츠 제작은 인터넷이 필요합니다</li>
         </ul>
       </div>
+      {ws === 'real' && <BackupCard />}
+      {ws === 'real' && <LockSettings />}
       <UpdateSettings />
       <Support />
       {ws === 'sample' && (

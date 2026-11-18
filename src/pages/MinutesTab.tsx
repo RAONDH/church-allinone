@@ -76,6 +76,7 @@ export default function MinutesTab({ data, reload }: { data: AdminData; reload: 
                 <li key={m.id} onClick={() => setView(m)}>
                   <span className="muted">{fmtDate(m.date)}</span><span className="pill info">{m.meeting}</span><b>{m.title || `${m.meeting} 회의록`}</b>
                   {m.audio && <span title="녹음 있음">🎙</span>}
+                  {m.recording && <span className={`pill ${recCut(m) ? 'warn' : 'info'}`}>{recCut(m) ? '녹음이 끊김' : '녹음 중'} · {clock(m.recording.seconds || 0)} 저장됨</span>}
                   {job ? <JobPill job={job} /> : m.ai ? <span className="pill done">AI 정리됨</span> : m.transcript ? <span className="pill todo">녹취록만 있음</span> : null}
                   {m.decisions && <span className="visit-note">결정: {m.decisions.split('\n')[0]}{m.decisions.includes('\n') ? ' …' : ''}</span>}
                 </li>
@@ -114,6 +115,7 @@ function MinutesView({ m, st, church, onClose, onEdit, reload }: { m: Minutes; s
     <>
       <div className="dialog-back" onClick={onClose}>
         <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+          {m.recording && <RecoverBox m={m} reload={reload} />}
           {m.audio && (
             <div className="sub-box">
               <div className="row between wrap">
@@ -238,6 +240,34 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
   const [text, setText] = useState('');
   const recRef = useRef<Recorder | null>(null);
   const ready = sttReady(st);
+  // 녹음 조각 저장: 녹음을 시작하면 회의록을 먼저 만들고, 30초마다 서버에 이어 붙인다 (창이 닫혀도 저장된 데까지 남음)
+  const mRef = useRef<string>('');
+  const queue = useRef<Int16Array[]>([]);
+  const seqRef = useRef(0);
+  const sending = useRef<Promise<void> | null>(null);
+  const [savedSecs, setSavedSecs] = useState(0);
+  const [lag, setLag] = useState(false);
+  const flush = () => {
+    if (sending.current) return sending.current;
+    sending.current = (async () => {
+      while (queue.current.length && mRef.current) {
+        const piece = queue.current[0];
+        try {
+          const r = await fetch(`${base}/minutes/${mRef.current}/rec?seq=${seqRef.current}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: piece.buffer as ArrayBuffer });
+          if (!r.ok) throw new Error(String(r.status));
+          const j = await r.json();
+          queue.current.shift(); seqRef.current++;
+          setSavedSecs(j.recording?.seconds || 0); setLag(false);
+        } catch { setLag(true); break; }   // 다음 차례에 다시 보냄 (그동안 조각은 이 창에 보관)
+      }
+    })().finally(() => { sending.current = null; });
+    return sending.current;
+  };
+  useEffect(() => {
+    if (mode !== 'recording') return;
+    const t = setInterval(() => { const r = recRef.current; if (!r) return; const piece = r.take(); if (piece.length) queue.current.push(piece); flush(); }, 30000);
+    return () => clearInterval(t);
+  }, [mode]);
 
   useEffect(() => {
     if (mode !== 'recording') return;
@@ -273,14 +303,35 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
     try {
       const r = new Recorder((s, lv) => { setSecs(s); setLevel(lv); });
       await r.start();
+      try { mRef.current = (await create()).id; } catch (e) { r.cancel(); throw e; }
+      queue.current = [new Int16Array(0)]; seqRef.current = 0; setSavedSecs(0); setLag(false);
+      flush();   // 빈 조각으로 '녹음 중' 표시를 바로 붙인다 (30초 안에 창이 닫혀도 목록에 남게)
       recRef.current = r; setPaused(false); setSecs(0); setMode('recording');
     } catch (e: any) { setErr(/Permission|NotAllowed/i.test(e.name + e.message) ? '마이크 사용이 막혀 있습니다. 주소창 왼쪽 자물쇠 아이콘에서 마이크를 허용해 주세요.' : /NotFound/i.test(e.name) ? '마이크를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인해 주세요.' : e.message); }
   };
   const stop = async () => {
     const r = recRef.current; if (!r) return;
     recRef.current = null;
-    const wav = r.stop();
-    await finish(wav, `${info.date} ${info.meeting} 녹음.wav`);
+    const rest = r.finish();
+    if (rest.length) queue.current.push(rest);
+    setMode('sending'); setErr(''); setMsg('녹음을 저장하는 중…');
+    const id = mRef.current;
+    try {
+      for (let i = 0; i < 5 && queue.current.length; i++) { await flush(); if (queue.current.length) await new Promise((ok) => setTimeout(ok, 1500)); }
+      if (queue.current.length) throw new Error('녹음 일부를 저장하지 못했습니다. 라온 교회 올인원이 켜져 있는지 확인한 뒤, 회의록 목록의 "저장된 녹음으로 마무리"를 눌러 주세요.');
+      await api(`${base}/minutes/${id}/rec/finish`, { method: 'POST' });
+      await api(`${base}/minutes/${id}`, { method: 'PUT', body: { ...info, content: '' } });   // 녹음 중에 고친 회의 이름·참석자
+      mRef.current = '';
+      if (ready) { setMsg('녹취를 시작했습니다…'); await api(`${base}/minutes/${id}/transcribe`, { method: 'POST', body: { auto } }); }
+      await reload();
+      setMode('done');
+      setMsg(ready ? `녹취를 시작했습니다. 회의록 목록에서 진행 상황이 보이고, 끝나면 ${auto ? 'AI가 이어서 정리합니다' : '녹취록이 들어갑니다'}. 이 창은 닫아도 됩니다.` : '녹음 파일을 회의록에 저장했습니다. 녹취 준비를 마친 뒤 회의록을 열어 "녹취하고 AI로 정리"를 누르세요.');
+    } catch (e: any) { setErr(e.message); setMode('done'); await reload(); }
+  };
+  const discard = async () => {
+    recRef.current?.cancel(); recRef.current = null; queue.current = [];
+    if (mRef.current) { try { await api(`${base}/minutes/${mRef.current}`, { method: 'DELETE' }); } catch { /* 이미 없음 */ } mRef.current = ''; }
+    await reload(); setMode('choose');
   };
   const pick = async (file: File) => {
     setErr('');
@@ -334,11 +385,12 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
             <div className={`rec-dot ${paused ? 'paused' : ''}`} />
             <div className="rec-time">{clock(secs)}</div>
             <div className="rec-meter"><div style={{ width: `${Math.min(100, level * 300)}%` }} /></div>
-            <p className="muted small">{paused ? '잠시 멈춤' : '녹음 중입니다. 이 창이나 브라우저를 닫지 마세요.'} 컴퓨터가 잠자기에 들어가지 않게 해 주세요.</p>
+            <p className="muted small">{paused ? '잠시 멈춤' : '녹음 중입니다.'} 30초마다 저장합니다{savedSecs ? ` (지금까지 ${clock(savedSecs)} 저장됨)` : ''}. 창이 닫혀도 저장된 데까지는 회의록에 남습니다. 컴퓨터가 잠자기에 들어가지 않게 해 주세요.</p>
+            {lag && <p className="alert warn small">저장이 잠시 밀렸습니다. 녹음은 계속되고, 다시 연결되면 이어서 저장합니다.</p>}
             <div className="row">
               <button onClick={() => { if (paused) recRef.current?.resume(); else recRef.current?.pause(); setPaused(!paused); }}>{paused ? '계속 녹음' : '잠시 멈춤'}</button>
               <button className="primary" onClick={stop}>녹음 끝내기</button>
-              <button className="danger-link" onClick={() => { if (confirm('녹음을 버릴까요? 저장되지 않습니다.')) { recRef.current?.cancel(); recRef.current = null; setMode('choose'); } }}>버리기</button>
+              <button className="danger-link" onClick={() => { if (confirm('녹음을 버릴까요? 지금까지 저장된 녹음도 지웁니다.')) discard(); }}>버리기</button>
             </div>
           </div>
         )}
@@ -481,4 +533,25 @@ function Cmd({ text }: { text: string }) {
     setOk(done ? '복사됨' : '직접 선택해 복사해 주세요');
   };
   return <div className="cmd"><code>{text}</code><button className="small" onClick={copy}>{ok || '복사'}</button></div>;
+}
+
+// 녹음이 끊긴 회의록: 마지막 조각이 1분 넘게 오지 않았으면 끊긴 것으로 본다
+const recCut = (m: Minutes) => !!m.recording && Date.now() - (m.recording.at || m.recording.startedAt) > 90000;
+function RecoverBox({ m, reload }: { m: Minutes; reload: () => Promise<void> }) {
+  const { base } = useApp();
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true); setErr('');
+    try { await api(`${base}/minutes/${m.id}/rec/finish`, { method: 'POST' }); await reload(); } catch (e: any) { setErr(e.message); }
+    setBusy(false);
+  };
+  return (
+    <div className={`alert ${recCut(m) ? 'warn' : 'info'} small`}>
+      {recCut(m) ? <>녹음이 중간에 끊겼습니다(창이 닫혔거나 컴퓨터가 잠들었을 수 있습니다). <b>{clock(m.recording?.seconds || 0)}</b>까지 저장되어 있습니다.</>
+        : <>이 회의는 지금 녹음 중입니다 ({clock(m.recording?.seconds || 0)} 저장됨).</>}
+      {recCut(m) && <> <button className="small" disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장된 녹음으로 마무리'}</button></>}
+      {err && <span className="warn-text"> {err}</span>}
+    </div>
+  );
 }

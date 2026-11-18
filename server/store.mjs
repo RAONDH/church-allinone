@@ -8,7 +8,11 @@ export const uid = () => crypto.randomBytes(6).toString('hex');
 
 const empty = () => ({ version: 1, church: null, weeks: {}, songMeta: {}, members: {}, visits: {}, attendance: {}, events: {}, minutes: {}, certs: {} });
 
-export function openStore(dataDir, ws) {
+// 이 컴퓨터 시간대 기준 날짜 (toISOString 은 UTC 라 한국에서는 오전 9시 전 저장이 어제 날짜가 됨)
+export const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** onSaved: 저장이 끝날 때마다 부르는 함수 (바깥 백업용) */
+export function openStore(dataDir, ws, { onSaved } = {}) {
   fs.mkdirSync(path.join(dataDir, 'backups'), { recursive: true });
   const file = path.join(dataDir, `${ws}.json`);
   let db = empty();
@@ -24,7 +28,7 @@ export function openStore(dataDir, ws) {
   let chain = Promise.resolve();
   function backup() {
     if (!fs.existsSync(file)) return;
-    const day = new Date().toISOString().slice(0, 10);
+    const day = localDay();
     const dst = path.join(dataDir, 'backups', `${ws}-${day}.json`);
     if (!fs.existsSync(dst)) fs.copyFileSync(file, dst);
     const old = fs.readdirSync(path.join(dataDir, 'backups')).filter((f) => f.startsWith(ws + '-')).sort();
@@ -36,6 +40,7 @@ export function openStore(dataDir, ws) {
       const tmp = `${file}.tmp`;
       await fs.promises.writeFile(tmp, JSON.stringify(db, null, 1));
       await fs.promises.rename(tmp, file);
+      if (onSaved) try { await onSaved(); } catch (e) { console.error('저장 뒤 백업:', e.message); }
     });
     return chain;
   }

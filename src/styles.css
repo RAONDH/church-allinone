@@ -437,3 +437,18 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 .update-foot { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 22px 18px; }
 .update-foot button.big { width: 100%; padding: 12px; font-size: 1.05rem; background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .update-foot button.big:disabled { opacity: .7; }
+
+/* 설정 → 백업 */
+.backup-card h3 { font-size: 1rem; margin: 16px 0 6px; }
+.backup-card .chips { margin-bottom: 6px; }
+.backup-card label.backup-file { display: inline-block; cursor: pointer; font-weight: 400; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.backup-list { list-style: none; padding: 0; margin: 6px 0; }
+.backup-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* 잠금 */
+.lock-screen .card { text-align: center; padding: 30px 24px; }
+.lock-screen .lock-icon { font-size: 2.6rem; }
+.lock-screen form { justify-content: center; margin: 12px 0; }
+.lock-screen input { width: 12em; text-align: center; font-size: 1.2rem; letter-spacing: .3em; }
+.lock-btn { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 4px 12px; font-size: .9rem; white-space: nowrap; }

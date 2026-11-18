@@ -32,6 +32,21 @@ describe('배포 스크립트', () => {
   });
 });
 
+describe('윈도우 점검·실행 파일', () => {
+  it('GitHub Actions 가 윈도우·맥에서 전체 점검을 돌리고, 윈도우에서는 묶음 실행 시험도 돈다', () => {
+    const y = fs.readFileSync(path.join(HUB, '.github', 'workflows', 'verify.yml'), 'utf8');
+    for (const t of ['windows-latest', 'macos-latest', 'npm ci', 'npm run verify', 'node tests/win-smoke.mjs']) expect({ t, has: y.includes(t) }).toEqual({ t, has: true });
+  });
+  it('윈도우 묶음과 실행 시험이 같은 실행 파일(installer/windows)을 쓰고, 실행 파일은 영문만 (윈도우 명령 창 한글 깨짐 방지)', () => {
+    const mw = sh('make-windows.sh'), smoke = fs.readFileSync(path.join(HUB, 'tests', 'win-smoke.mjs'), 'utf8');
+    for (const f of ['allinone.cmd', 'caster.cmd', 'hwp-start-hub.cmd']) {
+      expect({ f, inBundle: mw.includes(`installer/windows/${f}`) }).toEqual({ f, inBundle: true });
+      expect({ f, ascii: /^[\x00-\x7f]*$/.test(fs.readFileSync(path.join(HUB, 'installer', 'windows', f), 'utf8')) }).toEqual({ f, ascii: true });
+    }
+    for (const f of ['allinone.cmd', 'hwp-start-hub.cmd']) expect({ f, inSmoke: smoke.includes(`'${f}'`) }).toEqual({ f, inSmoke: true });
+  });
+});
+
 describe('서명 도구', () => {
   it('프로그램에 공개 열쇠가 없는 비밀 열쇠로는 서명하지 않는다 (실제 비밀 열쇠는 쓰지 않음)', () => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-sign-'));

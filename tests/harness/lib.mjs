@@ -90,6 +90,8 @@ export async function startHub({ env = {}, name = 'hub' } = {}) {
   });
   return {
     port, base, dataDir, log: () => out.join(''), rawGet,
+    // 몸통을 그대로 보내기 (녹음 조각·백업 파일)
+    postRaw: async (p, buf, headers = {}) => { const r = await fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...headers }, body: buf }); const t = await r.text(); let data = t; try { data = JSON.parse(t); } catch { /* 글 */ } return { status: r.status, data }; },
     get: (p, h) => call('GET', p, undefined, h), post: (p, b = {}, h) => call('POST', p, b, h), put: (p, b = {}, h) => call('PUT', p, b, h), del: (p) => call('DELETE', p),
     async stop() {
       try { child.kill(); } catch { /* 이미 끝남 */ }

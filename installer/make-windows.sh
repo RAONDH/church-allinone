@@ -69,13 +69,7 @@ CASTER="$ROOT/apps/예배송출"
 [ -f "$CASTER/app/server.js" ] || { echo "예배송출 묶음 구조가 예상과 다릅니다"; ls -R "$ROOT/apps" | head; exit 1; }
 rm -rf "$CASTER/node" "$CASTER/app/data"   # Node 는 묶음 맨 위의 것을 같이 씀, 남은 자료는 빼기
 # 예배송출만 따로 켜고 싶을 때 쓰는 실행 파일 (묶음의 Node 사용)
-printf '%s\r\n' '@echo off' \
-  'rem Worship Caster - made by Easy Pastor Lee Kwangbok' \
-  'set "WC_DATA_DIR=%APPDATA%\WorshipCaster"' \
-  'if not exist "%WC_DATA_DIR%" mkdir "%WC_DATA_DIR%"' \
-  'cd /d "%~dp0app"' \
-  'start "WorshipCaster (close this window to quit)" /min "%~dp0..\..\node\node.exe" server.js' \
-  > "$CASTER/예배송출 실행.cmd"
+sed 's/$/\r/' "$HUB/installer/windows/caster.cmd" > "$CASTER/예배송출 실행.cmd"
 
 echo "▶ 설교 쇼츠 메이커 윈도우판 (공개 릴리스 설치 파일)"
 SHORTS_REPO="raon-easypaster/sermon-shorts-maker"
@@ -96,35 +90,11 @@ mkdir -p "$HWPD"
 curl -sfL "https://codeload.github.com/raon-easypaster/hwp-pdf-to-markdown/tar.gz/refs/heads/main" | tar -xz -C "$HWPD" --strip-components 1
 [ -f "$HWPD/app.py" ] || { echo "HWP/PDF 변환기를 받지 못했습니다"; exit 1; }
 # 올인원이 창 없이 켜는 실행 파일 (영문만). 파이썬이 없으면 PYTHON_MISSING 을 남기고 끝낸다
-printf '%s\r\n' '@echo off' \
-  'cd /d "%~dp0"' \
-  'set "PY="' \
-  'where py >nul 2>nul && set "PY=py -3"' \
-  'if not defined PY where python >nul 2>nul && set "PY=python"' \
-  'if not exist venv\Scripts\python.exe (' \
-  '  if not defined PY (echo PYTHON_MISSING & exit /b 9)' \
-  '  %PY% -m venv venv || (echo PYTHON_MISSING & exit /b 9)' \
-  '  venv\Scripts\python -m pip install -q pyhwp olefile tqdm flask six pypdf || exit /b 1' \
-  ')' \
-  'set FLASK_DEBUG=0' \
-  'venv\Scripts\python -m flask --app app run --host 127.0.0.1 --port 5050 --no-debugger --no-reload' \
-  > "$HWPD/start-hub.cmd"
+sed 's/$/\r/' "$HUB/installer/windows/hwp-start-hub.cmd" > "$HWPD/start-hub.cmd"
 
 echo "▶ 실행 파일 · 사용법"
 # 실행 파일 내용은 영문만 (윈도우 명령 창 한글 깨짐 방지)
-printf '%s\r\n' '@echo off' \
-  'rem Church All-in-One - made by Easy Pastor Lee Kwangbok' \
-  'set "PORT=5191"' \
-  'curl -s -o nul http://localhost:5191/api/health && goto open' \
-  'cd /d "%~dp0hub"' \
-  'start "ChurchAllInOne (close this window to quit)" /min "%~dp0node\node.exe" server\index.mjs' \
-  'for /l %%i in (1,1,40) do (' \
-  '  curl -s -o nul http://localhost:5191/api/health && goto open' \
-  '  ping -n 2 127.0.0.1 >nul' \
-  ')' \
-  ':open' \
-  'start "" http://localhost:5191' \
-  > "$ROOT/라온 교회 올인원 실행.cmd"
+sed 's/$/\r/' "$HUB/installer/windows/allinone.cmd" > "$ROOT/라온 교회 올인원 실행.cmd"
 
 python3 - "$ROOT/사용법.txt" "$VERSION" <<'PY'
 import sys

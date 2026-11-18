@@ -16,6 +16,9 @@ import { financeApi } from './finance.mjs';
 import { adminApi, fetchGcal, minutesBusy } from './admin.mjs';
 import { makeUpdater } from './update.mjs';
 import { bootingFile } from './boot.mjs';
+import { makeBackups } from './backup.mjs';
+import { makeLock, areaOf } from './lock.mjs';
+import { bulletinData, bulletinHtml, cleanBulletinSettings, BULLETIN_DEFAULTS } from './bulletin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -40,11 +43,18 @@ const busyNow = () => (afterJobs.size ? '설교 후 자료를 만드는 중이�
 const updater = makeUpdater({ dataDir: DATA_DIR, version: VERSION, appRoot: process.env.HUB_APP_ROOT || ROOT, isBusy: () => busyNow(), restart: (v) => restartInto(v) });
 
 // ── 작업 공간: real(우리 교회) / sample(예제) ─────────────────
+let backups = null;   // 아래에서 만듦 (저장할 때마다 하루 한 번 바깥 백업)
 const sampleWc = memoryWc(path.join(DATA_DIR, 'sample-caster.json'), sampleWcSeed);
 const spaces = {
-  real: { store: openStore(DATA_DIR, 'real'), wc: () => httpWc(spaces.real.store.db.settings?.wcUrl || WC_URL) },
+  real: { store: openStore(DATA_DIR, 'real', { onSaved: () => backups?.external() }), wc: () => httpWc(spaces.real.store.db.settings?.wcUrl || WC_URL) },
   sample: { store: openStore(DATA_DIR, 'sample'), wc: () => sampleWc },
 };
+backups = makeBackups({ dataDir: DATA_DIR, store: spaces.real.store, isBusy: () => busyNow() });
+// 성도·재정·행정 잠금 (실제 교회 자료만). 자료 폴더에 '잠금풀기.txt' 가 있으면 켤 때 잠금을 없앤다
+const lock = makeLock({ dataDir: DATA_DIR });
+if (lock.applyReset(spaces.real.store.db)) { await spaces.real.store.save(); console.log('[잠금] 잠금풀기 파일이 있어 잠금을 없앴습니다.'); }
+backups.external().catch(() => {});   // 켤 때 한 번 (오늘 아직 안 했으면)
+
 async function resetSample() {
   sampleWc.reset();
   const people = samplePeopleSeed();
@@ -180,6 +190,9 @@ function afterRun(job, task) {
   if (afterBusy < AFTER_MAX) go(); else { job.waiting = true; afterWait.push(go); }
 }
 
+// 백업 모듈의 오류(code 400·404·409)를 화면에 그대로 알린다
+const wrapB = async (fn) => { try { return await fn(); } catch (e) { throw e.code >= 400 && e.code < 500 ? new HttpError(e.code, e.message) : e; } };
+
 // ── API ──────────────────────────────────────────
 async function api(req, res, url) {
   const p = url.pathname;
@@ -193,6 +206,22 @@ async function api(req, res, url) {
     if (busy) throw new HttpError(409, `${busy} 끝난 뒤에 업데이트해 주세요. (업데이트하면 프로그램이 다시 켜집니다)`);
     updater.install();   // 뒤에서 받고 설치한다. 화면은 /api/update 의 job 으로 진행을 본다
     return send(res, 200, updater.view());
+  }
+  // ── 백업 (실제 교회 자료만) ──
+  if (p === '/api/backup' && req.method === 'GET') return send(res, 200, backups.view());
+  // 잠금을 켰으면 상태 보기만 빼고 모든 백업 기능(폴더 바꾸기·지금 백업·받기·되살리기)은 암호 뒤에
+  if (p.startsWith('/api/backup/')) await wrapB(() => lock.guardAny(spaces.real.store.db, req));
+  if (p === '/api/backup/settings' && req.method === 'PUT') { const b = await body(req); const r = await wrapB(() => backups.setDir(b.dir)); return send(res, 200, { ...backups.view(), result: r }); }
+  if (p === '/api/backup/now' && req.method === 'POST') { const r = await backups.external(true); return send(res, 200, { ...backups.view(), result: r }); }
+  if (p === '/api/backup/download' && req.method === 'GET') { await backups.download(res); return; }
+  if (p === '/api/backup/restore-local' && req.method === 'POST') { const b = await body(req); return send(res, 200, await wrapB(() => backups.restoreLocal(b.file))); }
+  if (p === '/api/backup/restore' && req.method === 'POST') {
+    // 브라우저가 미리 확인(preflight)해야만 붙일 수 있는 머리글이 있어야 받는다 → 다른 곳에서 몰래 보내는 되살리기를 막음
+    if (!req.headers['x-file-name']) throw new HttpError(400, '백업 파일 이름(X-File-Name)이 없는 요청은 받지 않습니다.');
+    const chunks = []; let n = 0;
+    for await (const c of req) { n += c.length; if (n > 2e9) throw new HttpError(413, '백업 파일이 2GB보다 큽니다.'); chunks.push(c); }
+    const name = decodeURIComponent(String(req.headers['x-file-name'] || 'backup'));
+    return send(res, 200, await wrapB(() => backups.restoreUpload(Buffer.concat(chunks), name)));
   }
   if (p === '/api/update/snooze' && req.method === 'POST') { const b = await body(req); updater.snooze(b.version); return send(res, 200, updater.view()); }
   if (p === '/api/update/settings' && req.method === 'PUT') { const b = await body(req); updater.setNotify(b.notify !== false); return send(res, 200, updater.view()); }
@@ -222,6 +251,15 @@ async function api(req, res, url) {
   const sub = r[2] || '/';
   const s = (re) => sub.match(re);
   let q;
+
+  // ── 잠금 (실제 교회 자료의 성도·재정·행정) ──
+  if (r[1] === 'real') {
+    if (sub === '/lock' && req.method === 'GET') return send(res, 200, lock.view(db, req));
+    if (sub === '/lock/unlock' && req.method === 'POST') { const b = await body(req); return send(res, 200, await wrapB(() => lock.unlock(db, b.pin, res))); }
+    if (sub === '/lock/lock' && req.method === 'POST') { lock.lockNow(req, res); return send(res, 200, lock.view(db, req)); }
+    if (sub === '/lock' && req.method === 'PUT') { const b = await body(req); const v = await wrapB(() => lock.configure(db, b, res)); await sp.store.save(); return send(res, 200, v); }
+    await wrapB(() => lock.guard(db, req, areaOf(sub)));
+  }
 
   if (sub === '/' && req.method === 'GET') {
     const wc = await wcTry(async () => { const st = await sp.wc().state(); return { services: st.services.map((x) => ({ id: x.id, name: x.name, date: x.date, count: x.itemIds.length })), currentServiceId: st.currentServiceId }; });
@@ -399,6 +437,20 @@ async function api(req, res, url) {
     if (!w.wc?.serviceId) throw new HttpError(400, '예배송출 예배 순서와 연결되어 있지 않습니다.');
     await sp.wc().setCurrent(w.wc.serviceId);
     return send(res, 200, { ok: true, url: sp.wc().kind === 'http' ? `${sp.wc().base.replace('127.0.0.1', 'localhost')}/control` : null });
+  }
+
+  // 주보: 고정 정보(주소·예배 시간·계좌·표어)와 보일 칸 고르기, 인쇄용·휴대폰 주보 만들기
+  if (sub === '/bulletin' && req.method === 'GET') return send(res, 200, { ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) });
+  if (sub === '/bulletin' && req.method === 'PUT') { db.bulletin = cleanBulletinSettings(await body(req)); await sp.store.save(); return send(res, 200, db.bulletin); }
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
+    const w = getWeek(sp, q[1]);
+    // 예배 순서: 예배송출에서 (꺼져 있으면 확정본에서)
+    const st = await weekStatus(sp, w);
+    const order = (st.summary?.items || w.final?.snap?.items || []).map((i) => ({ title: i.title, type: i.type }));
+    const format = url.searchParams.get('format') === 'mobile' ? 'mobile' : 'print';
+    const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
+    if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date}.html`)}`;
+    res.writeHead(200, headers); res.end(bulletinHtml(bulletinData({ db, week: w, order }), format)); return;
   }
 
   // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 라온 교회 올인원)

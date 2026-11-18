@@ -34,6 +34,8 @@ export class Recorder {
     try { this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } }); }
     catch (e) { setBusy('recording', false); throw e; }
     this.ctx = new AudioContext();
+    // 브라우저가 오디오를 멈춘 상태로 만들었으면 깨운다 (멈춰 있으면 녹음 시간이 0:00 에서 움직이지 않음)
+    if (this.ctx.state !== 'running') await this.ctx.resume().catch(() => {});
     const src = this.ctx.createMediaStreamSource(this.stream);
     this.node = this.ctx.createScriptProcessor(4096, 1, 1);
     const rate = this.ctx.sampleRate;
@@ -51,6 +53,15 @@ export class Recorder {
   resume() { this.paused = false; }
   private close() { setBusy('recording', false); this.node?.disconnect(); this.stream?.getTracks().forEach((t) => t.stop()); this.ctx?.close(); this.node = null; this.stream = null; this.ctx = null; }
   stop() { this.close(); const b = wavBlob(this.chunks); this.chunks = []; return b; }
+  /** 지금까지 쌓인 소리를 꺼내고 비운다 (16kHz 모노 16비트). 녹음 중 조각 저장용 — 메모리가 계속 늘지 않게 */
+  take() {
+    const n = this.chunks.reduce((s, c) => s + c.length, 0), out = new Int16Array(n);
+    let o = 0; for (const c of this.chunks) { out.set(c, o); o += c.length; }
+    this.chunks = [];
+    return out;
+  }
+  /** 녹음을 끝내고 남은 소리를 꺼낸다 */
+  finish() { this.close(); return this.take(); }
   cancel() { this.close(); this.chunks = []; }
 }
 

@@ -196,6 +196,7 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
   const audioFile = (m) => (m?.audio?.file ? path.join(recDir, path.basename(m.audio.file)) : '');
   if ((q = s(/^\/minutes\/([a-f0-9]+)$/)) && req.method === 'DELETE' && db.minutes[q[1]]) {
     const f = audioFile(db.minutes[q[1]]); if (f) fs.rmSync(f, { force: true });   // 회의록을 지우면 녹음 파일도 함께
+    fs.rmSync(path.join(recDir, `${q[1]}.rec.pcm`), { force: true });   // 녹음 중이던 조각도
   }
   // 회의록에 새 회의 이름을 쓰면 회의 이름 목록에도 더한다
   const cleanAndRemember = (b) => { const x = cleanMinutes(b); if (!db.meetingTypes.includes(x.meeting) && x.meeting !== '회의') db.meetingTypes.push(x.meeting); return x; };
@@ -280,6 +281,46 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
       const f = audioFile(m); if (f) fs.rmSync(f, { force: true });
       delete m.audio; await save(); send(res, 200, { ok: true }); return true;
     }
+  }
+  // 녹음 조각 저장: 녹음하는 동안 30초마다 16kHz 모노 16비트 소리를 이어 붙인다 (창이 닫혀도 저장된 데까지는 남음)
+  if ((q = s(/^\/minutes\/([a-f0-9]+)\/rec$/)) && req.method === 'POST') {
+    const m = getM(q[1]);
+    const seq = Number(new URL(req.url, 'http://x').searchParams.get('seq'));
+    if (!Number.isInteger(seq) || seq < 0) throw new HttpError(400, '조각 번호가 없습니다.');
+    const chunks = []; let n = 0;
+    for await (const c of req) { n += c.length; if (n > 64e6) throw new HttpError(413, '녹음 조각이 너무 큽니다.'); chunks.push(c); }
+    const buf = Buffer.concat(chunks);
+    if (buf.length % 2) throw new HttpError(400, '녹음 조각 모양이 올바르지 않습니다.');
+    const r = (m.recording ??= { startedAt: Date.now(), seq: -1, bytes: 0 });
+    if (seq <= r.seq) { send(res, 200, { recording: r, duplicate: true }); return true; }   // 다시 보낸 조각
+    if (seq !== r.seq + 1) throw new HttpError(409, `조각 순서가 맞지 않습니다 (기다리는 번호 ${r.seq + 1}).`);
+    fs.mkdirSync(recDir, { recursive: true });
+    await fs.promises.appendFile(path.join(recDir, `${m.id}.rec.pcm`), buf);
+    Object.assign(r, { seq, bytes: r.bytes + buf.length, seconds: Math.round((r.bytes + buf.length) / 32000), at: Date.now() });
+    await save();
+    send(res, 200, { recording: r });
+    return true;
+  }
+  // 녹음 마무리: 이어 붙인 조각을 wav 로 (녹음을 마쳤을 때, 또는 끊긴 녹음을 저장된 데까지 살릴 때)
+  if ((q = s(/^\/minutes\/([a-f0-9]+)\/rec\/finish$/)) && req.method === 'POST') {
+    const m = getM(q[1]);
+    const pcm = path.join(recDir, `${m.id}.rec.pcm`);
+    const size = fs.existsSync(pcm) ? fs.statSync(pcm).size : 0;
+    if (!size) { delete m.recording; await save(); throw new HttpError(400, '저장된 녹음이 없습니다.'); }
+    const file = path.join(recDir, `${m.id}.wav`), part = `${file}.part`;
+    const h = Buffer.alloc(44);
+    h.write('RIFF', 0); h.writeUInt32LE(36 + size, 4); h.write('WAVE', 8); h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+    h.writeUInt32LE(16000, 24); h.writeUInt32LE(32000, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(size, 40);
+    fs.writeFileSync(part, h);
+    await new Promise((ok, no) => fs.createReadStream(pcm).pipe(fs.createWriteStream(part, { flags: 'a' })).on('finish', ok).on('error', no));
+    const old = audioFile(m); if (old && old !== file) fs.rmSync(old, { force: true });
+    fs.renameSync(part, file);
+    fs.rmSync(pcm, { force: true });
+    m.audio = { file: path.basename(file), name: `${m.date} ${m.meeting} 녹음.wav`, size: size + 44, at: Date.now() };
+    delete m.recording;
+    await save();
+    send(res, 200, { audio: m.audio, seconds: Math.round(size / 32000) });
+    return true;
   }
   // 녹취 (끝나면 auto=true 일 때 이어서 AI 정리)
   if ((q = s(/^\/minutes\/([a-f0-9]+)\/(transcribe|summarize)$/)) && req.method === 'POST') {
