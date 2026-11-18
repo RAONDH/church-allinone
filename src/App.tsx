@@ -9,8 +9,9 @@ import Guide from './pages/Guide';
 import People from './pages/People';
 import Finance from './pages/Finance';
 import Admin from './pages/Admin';
+import { UpdateBell, UpdateDialog, useUpdate, type UpdateView } from './pages/Update';
 
-interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () => Promise<void>; base: string; loadError: string }
+interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () => Promise<void>; base: string; loadError: string; upd: UpdateView | null; setUpd: (v: UpdateView) => void; reloadUpd: (force?: boolean) => Promise<UpdateView | null> }
 const C = createContext<Ctx>(null as any);
 export const useApp = () => useContext(C);
 
@@ -33,9 +34,10 @@ export default function App() {
   }, [base]);
   useEffect(() => { reload(); }, [reload]);
   const setWs = (w: Ws) => { try { localStorage.setItem('ws', w); } catch { /* 저장 안 돼도 동작 */ } setWsState(w); };
+  const update = useUpdate();
 
   return (
-    <C.Provider value={{ ws, setWs, ov, reload, base, loadError }}>
+    <C.Provider value={{ ws, setWs, ov, reload, base, loadError, upd: update.u, setUpd: update.setU, reloadUpd: update.load }}>
       {ws === 'sample' && (
         <div className="sample-banner">
           <b>예제 자료를 보고 있습니다.</b> 여기서 바꾼 내용은 실제 교회 자료·실제 예배송출에 영향을 주지 않습니다.
@@ -54,6 +56,7 @@ export default function App() {
           <NavLink to="/settings">설정</NavLink>
           <NavLink to="/guide">사용설명서</NavLink>
         </nav>
+        <UpdateBell u={update.u} onOpen={() => update.setOpen(true)} />
         <div className="ws-toggle" role="group" aria-label="자료 선택">
           <button className={ws === 'real' ? 'on' : ''} onClick={() => setWs('real')}>우리 교회</button>
           <button className={ws === 'sample' ? 'on sample' : ''} onClick={() => setWs('sample')}>예제</button>
@@ -82,6 +85,7 @@ export default function App() {
             </Routes>
           )}
       </main>
+      {update.open && update.u?.available && <UpdateDialog u={update.u} setU={update.setU} onClose={() => update.setOpen(false)} />}
       <footer className="site-foot">
         라온 교회 올인원은 무료로 쓰실 수 있습니다. <NavLink to="/settings#support">후원 안내</NavLink> · <a href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">카카오 오픈채팅 문의</a>
       </footer>
@@ -202,11 +206,34 @@ export function Settings() {
           <li>⚠️ 찬양곡 추천(PraiseFlow), 가사 인터넷 검색, 쇼츠 제작은 인터넷이 필요합니다</li>
         </ul>
       </div>
+      <UpdateSettings />
       <Support />
       {ws === 'sample' && (
         <div className="card"><h2>예제 자료</h2><button onClick={resetSample}>예제 자료 처음 상태로</button></div>
       )}
     </section>
+  );
+}
+
+function UpdateSettings() {
+  const { upd, setUpd, reloadUpd } = useApp();
+  const [msg, setMsg] = useState('');
+  const toggle = async (on: boolean) => {
+    try { setUpd(await api<UpdateView>('/api/update/settings', { method: 'PUT', body: { notify: on } })); } catch (e: any) { setMsg(e.message); }
+  };
+  const checkNow = async () => {
+    setMsg('확인하는 중…');
+    const v = await reloadUpd(true);
+    setMsg(!v ? '확인하지 못했습니다.' : v.checkError ? `확인하지 못했습니다: ${v.checkError}` : v.available ? `새 버전 v${v.latest?.version}이 있습니다. 위쪽 🔔 새 버전을 눌러 주세요.` : '지금 버전이 최신입니다.');
+  };
+  return (
+    <div className="card">
+      <h2>업데이트</h2>
+      <p>지금 버전: <b>v{upd?.current || '…'}</b></p>
+      <label className="check"><input type="checkbox" checked={upd?.notify !== false} onChange={(e) => toggle(e.target.checked)} />새 버전이 나오면 알려 주기</label>
+      <p className="muted small">6시간에 한 번 GitHub에서 새 버전을 확인합니다. 끄면 안내 창이 저절로 뜨지 않고, 위쪽 🔔 새 버전 단추로만 보입니다.</p>
+      <div className="row"><button onClick={checkNow}>지금 확인</button>{msg && <span className="muted small">{msg}</span>}</div>
+    </div>
   );
 }
 

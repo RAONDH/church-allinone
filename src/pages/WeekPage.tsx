@@ -7,6 +7,7 @@ import { fmtDate, fmtTime, matchSongs, norm, prepSteps, setlistText } from '../l
 import { StepList } from './Home';
 import AfterTab from './AfterTab';
 import { docText } from '../lib/docText';
+import { setBusy } from '../lib/busy';
 
 const TABS = [['info', '예배 정보'], ['setlist', '찬양 콘티'], ['subs', '자막'], ['outputs', '결과물'], ['after', '설교 후 자료']] as const;
 const EDITABLE = ['date', 'name', 'passage', 'sermonTitle', 'announcements', 'sermonNotes', 'sermonVideoUrl', 'prayerLeader'] as const;
@@ -59,6 +60,8 @@ export default function WeekPage() {
     }
   }, [base, id, pendingKey, loadStatus, reload]);
 
+  // 저장하지 않은 입력이 있는 동안은 업데이트 안내 창을 띄우지 않음
+  useEffect(() => { setBusy('saving', save.state !== 'saved'); return () => setBusy('saving', false); }, [save.state]);
   // 자동 저장: 입력이 멈추고 0.7초 뒤, 실패하면 5초마다 다시 시도
   useEffect(() => {
     if (save.state === 'dirty') { const t = setTimeout(doSave, 700); return () => clearTimeout(t); }

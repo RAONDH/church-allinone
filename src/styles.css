@@ -417,3 +417,23 @@ h4 { margin: 4px 0 8px; font-size: .95rem; }
 }
 .after-act button.primary-btn { background: var(--accent); color: #fff; border-color: var(--accent); }
 .after-main .ok-text { margin: 4px 0 0; }
+
+/* 새 버전 알림 */
+.update-bell { border: 1px solid #2563eb; color: #1d4ed8; background: #eff6ff; border-radius: 99px; padding: 4px 12px; font-size: .9rem; white-space: nowrap; }
+.update-bell:hover { background: #dbeafe; }
+.update-dialog { padding: 0; overflow: hidden; max-width: 560px; }
+.update-head { display: flex; gap: 14px; align-items: center; background: linear-gradient(135deg, #1d4ed8, #3b82f6); color: #fff; padding: 20px 22px; }
+.update-head h2 { margin: 0; color: #fff; font-size: 1.25rem; }
+.update-head p { margin: 2px 0 0; opacity: .95; }
+.update-icon { font-size: 2rem; background: #ffffff26; border-radius: 14px; width: 54px; height: 54px; display: grid; place-items: center; }
+.update-body { padding: 16px 22px 4px; }
+.update-body h3 { margin: 0 0 6px; font-size: 1rem; }
+.update-notes { max-height: 280px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: .92rem; }
+.update-notes h3, .update-notes h4 { font-size: .95rem; margin: 10px 0 4px; }
+.update-notes ul { padding-left: 1.2em; margin: 4px 0; }
+.update-notes p { margin: 6px 0; }
+.update-progress .bar { height: 8px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+.update-progress .bar span { display: block; height: 100%; background: #2563eb; transition: width .3s; }
+.update-foot { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 22px 18px; }
+.update-foot button.big { width: 100%; padding: 12px; font-size: 1.05rem; background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.update-foot button.big:disabled { opacity: .7; }

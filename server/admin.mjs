@@ -10,6 +10,8 @@ import { minutesPrompt, parseMinutesJson, SAMPLE_TRANSCRIPT, sampleMinutes } fro
 
 // 회의록 녹취·정리 작업 (뒤에서 돌고 화면이 상태를 다시 묻는다)
 const mJobs = new Map();
+/** 돌고 있는 녹취·정리 작업 수 (업데이트로 다시 켜기 전에 확인) */
+export const minutesBusy = () => [...mJobs.values()].filter((j) => !j.error).length;
 
 // 이 컴퓨터 시간대 기준 오늘 (toISOString 은 UTC라 아침 9시 전엔 어제가 됨)
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

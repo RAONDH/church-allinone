@@ -1,4 +1,5 @@
 // 브라우저 녹음 → 16kHz 모노 WAV (whisper 가 바로 읽는 형식). 녹음 파일(m4a 등)도 같은 형식으로 바꾼다.
+import { setBusy } from './busy';
 const RATE = 16000;
 
 function wavBlob(chunks: Int16Array[], rate = RATE) {
@@ -29,7 +30,9 @@ export class Recorder {
   private paused = false;
   constructor(private onTick: (seconds: number, level: number) => void) {}
   async start() {
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+    setBusy('recording', true);   // 녹음하는 동안은 업데이트 안내 창을 띄우지 않음
+    try { this.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: true, autoGainControl: true } }); }
+    catch (e) { setBusy('recording', false); throw e; }
     this.ctx = new AudioContext();
     const src = this.ctx.createMediaStreamSource(this.stream);
     this.node = this.ctx.createScriptProcessor(4096, 1, 1);
@@ -46,7 +49,7 @@ export class Recorder {
   }
   pause() { this.paused = true; }
   resume() { this.paused = false; }
-  private close() { this.node?.disconnect(); this.stream?.getTracks().forEach((t) => t.stop()); this.ctx?.close(); this.node = null; this.stream = null; this.ctx = null; }
+  private close() { setBusy('recording', false); this.node?.disconnect(); this.stream?.getTracks().forEach((t) => t.stop()); this.ctx?.close(); this.node = null; this.stream = null; this.ctx = null; }
   stop() { this.close(); const b = wavBlob(this.chunks); this.chunks = []; return b; }
   cancel() { this.close(); this.chunks = []; }
 }

@@ -20,6 +20,7 @@
 |---|---|
 | **ChurchAllInOne-mac.zip** | 맥 (애플 칩·인텔) |
 | **ChurchAllInOne-windows.zip** | 윈도우 10·11 |
+| ChurchAllInOne-update.zip | 프로그램 안 자동 업데이트용 (직접 받을 필요 없음) |
 | SHA256SUMS.txt | 받은 파일이 원본과 같은지 확인하는 값 |
 
 한 묶음에 아래 프로그램이 모두 들어 있습니다.
@@ -47,7 +48,7 @@
 3. `라온 교회 올인원 실행.cmd`를 두 번 누릅니다. 설치 과정 없이 바로 열립니다(Node.js가 들어 있음). "Windows의 PC 보호" 창이 뜨면 **[추가 정보] → [실행]**.
 4. 설교 쇼츠 메이커는 올인원 위 메뉴 **프로그램**에서 **설치하기**를 한 번 누르면 설치됩니다.
 
-**새 버전**은 같은 방법으로 받아 설치(윈도우는 폴더 바꾸기)하면 됩니다. 입력한 교회 자료는 그대로 남습니다.
+**새 버전**이 나오면 프로그램이 알려 주고, **지금 업데이트**를 누르면 받아서 설치하고 다시 켜집니다(v0.2.5부터). 같은 방법으로 새 묶음을 받아 설치(윈도우는 폴더 바꾸기)해도 됩니다. 어느 쪽이든 입력한 교회 자료는 그대로 남습니다.
 
 처음 열면 교회 이름을 넣고 시작하거나, **예제**로 먼저 둘러볼 수 있습니다. 예제에서 바꾼 것은 실제 자료와 예배송출에 영향이 없습니다.
 
@@ -143,7 +144,7 @@ npm install && npm run build && npm start   # http://localhost:5191
 
 | 위치 | 내용 |
 |---|---|
-| `server/` | Node 서버(런타임 npm 부품 없음). `index.mjs` 주소 처리, `after.mjs` 설교 후 자료 지시문, `people`·`finance`·`admin.mjs` 교회 살림, `ai.mjs` 구독 AI 실행, `stt.mjs` 녹취(whisper.cpp), `ical.mjs` 캘린더 |
+| `server/` | Node 서버(런타임 npm 부품 없음). `index.mjs` 시작 파일(받아 둔 새 버전 고르기), `main.mjs` 주소 처리, `update.mjs` 새 버전 알림·자동 설치, `after.mjs` 설교 후 자료 지시문, `people`·`finance`·`admin.mjs` 교회 살림, `ai.mjs` 구독 AI 실행, `stt.mjs` 녹취(whisper.cpp), `ical.mjs` 캘린더 |
 | `src/` | React + Vite 화면 |
 | `apps.json` | 이어 주는 프로그램 목록(포트, 맥 실행 명령, 윈도우 `win` 설정) |
 | `docs/` | 소개 페이지(GitHub Pages). 화면 사진은 모두 예제 자료(`?ws=sample`)로 찍었습니다. |
@@ -166,7 +167,12 @@ npm install && npm run build && npm start   # http://localhost:5191
   - 공식 `node.exe`(체크섬 확인), 빌드된 올인원·PraiseFlow 화면, [예배송출 최신 윈도우판](https://github.com/raon-easypaster/worship-caster/releases/latest)과 설교 쇼츠 메이커 공식 설치 파일(둘 다 체크섬 확인), HWP/PDF 변환기 원본을 한 폴더에 묶습니다.
   - 자료는 `%APPDATA%\ChurchAllInOne`(예배송출은 `%APPDATA%\WorshipCaster`)에 저장되어 폴더를 바꿔도 남습니다.
   - 윈도우에서는 `apps.json`의 `win` 설정으로 켭니다. 설교 쇼츠 메이커는 설치 파일로 설치한 뒤 자기 창으로 열리고(`exe`·`installer`), HWP 변환기는 `start-hub.cmd`로 켭니다.
-- 배포 순서: `package.json` 버전 올리기 → `npm test`·`npm run build` → 두 묶음 만들기(맥 묶음은 `ChurchAllInOne-mac.zip`으로 이름 바꿈) → `SHA256SUMS.txt` → 릴리스에 세 파일 올리기.
+- **자동 업데이트 묶음** `installer/make-update.sh [만들 위치]` → `ChurchAllInOne-update.zip` (맥·윈도우 공통: `server`·빌드된 `dist`·`apps.json`·`package.json`).
+  - 프로그램은 6시간마다 [Releases latest](https://github.com/raon-easypaster/church-allinone/releases/latest)를 확인합니다. 이 파일과 `SHA256SUMS.txt`가 릴리스에 있어야 자동 설치합니다.
+  - 받는 주소는 이 저장소의 `releases/download/`로만 제한합니다. 확인값이 맞을 때만 자료를 백업하고, 자료 폴더 `app-update/버전`에 다 푼 뒤 `current.json`을 바꿉니다.
+  - 켤 때 `server/index.mjs`(시작 파일, `server/boot.mjs`)가 앱보다 새 버전이 받아져 있으면 그 `main.mjs`를 켭니다. 켜지 못하면 치우고 앱에 든 버전으로 켭니다. 앱이 더 새것이면 받아 둔 것은 지웁니다.
+  - 맥 `.app`이나 앱 폴더의 파일은 고치지 않습니다.
+- 배포 순서: `package.json` 버전 올리기 → `npm test`(가짜 배포 서버로 자동 설치까지 점검)·`npm run build` → 세 묶음 만들기(맥 묶음은 `ChurchAllInOne-mac.zip`으로 이름 바꿈) → 세 파일의 `SHA256SUMS.txt` → 릴리스에 네 파일 올리기.
 
 ### 앞으로
 
