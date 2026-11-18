@@ -42,9 +42,8 @@ const results = await runChecks('윈도우 묶음 실행 시험', [
     const dir = path.join(tmp, 'hwp');
     fs.mkdirSync(dir, { recursive: true });
     const tgz = path.join(tmp, 'hwp.tgz');
-    const r = await fetch('https://codeload.github.com/raon-easypaster/hwp-pdf-to-markdown/tar.gz/refs/heads/main');
-    ok(r.ok, 'HWP 변환기 원본 받기', r.status);
-    fs.writeFileSync(tgz, Buffer.from(await r.arrayBuffer()));
+    const dl = spawnSync('curl', ['-sfL', '--retry', '3', '-o', tgz, 'https://codeload.github.com/raon-easypaster/hwp-pdf-to-markdown/tar.gz/refs/heads/main'], { encoding: 'utf8', timeout: 300000 });
+    eq(dl.status, 0, `HWP 변환기 원본 받기 ${dl.stderr || ''}`);
     const t = spawnSync('tar', ['-xzf', tgz, '-C', dir, '--strip-components', '1'], { encoding: 'utf8' });
     eq(t.status, 0, `압축 풀기 ${t.stderr}`);
     crlf(path.join(HUB, 'installer', 'windows', 'hwp-start-hub.cmd'), path.join(dir, 'start-hub.cmd'));
@@ -59,11 +58,14 @@ const results = await runChecks('윈도우 묶음 실행 시험', [
     const rel = await (await fetch('https://api.github.com/repos/raon-easypaster/sermon-shorts-maker/releases/latest', { headers: { 'User-Agent': 'allinone-ci', ...(process.env.GH_TOKEN ? { Authorization: `Bearer ${process.env.GH_TOKEN}` } : {}) } })).json();
     const exe = rel.assets.find((a) => /Setup-.*\.exe$/.test(a.name)), sums = rel.assets.find((a) => a.name === 'SHA256SUMS.txt');
     ok(exe && sums, '릴리스에 설치 파일과 확인값', rel.assets?.map((a) => a.name));
-    const buf = Buffer.from(await (await fetch(exe.browser_download_url)).arrayBuffer());
-    const want = (await (await fetch(sums.browser_download_url)).text()).replace(/\r/g, '').split('\n').find((l) => l.endsWith(exe.name))?.split(/\s+/)[0];
-    eq(crypto.createHash('sha256').update(buf).digest('hex'), want, '설치 파일 확인값');
-    const setup = path.join(tmp, exe.name);
-    fs.writeFileSync(setup, buf);
+    // 큰 파일은 curl 로 받는다 (Node 의 fetch 가 큰 내려받기 끝에서 멈추는 일이 있어서)
+    const setup = path.join(tmp, exe.name), sumsFile = path.join(tmp, 'shorts-sums.txt');
+    for (const [url, out] of [[exe.browser_download_url, setup], [sums.browser_download_url, sumsFile]]) {
+      const c = spawnSync('curl', ['-sfL', '--retry', '3', '-o', out, url], { encoding: 'utf8', timeout: 600000 });
+      eq(c.status, 0, `내려받기 ${path.basename(out)} ${c.stderr || ''}`);
+    }
+    const want = fs.readFileSync(sumsFile, 'utf8').replace(/\r/g, '').split('\n').find((l) => l.endsWith(exe.name))?.split(/\s+/)[0];
+    eq(crypto.createHash('sha256').update(fs.readFileSync(setup)).digest('hex'), want, '설치 파일 확인값');
     const s = spawnSync(setup, ['/S'], { timeout: 300000 });
     eq(s.status, 0, '조용히 설치 (/S)');
     const app = JSON.parse(fs.readFileSync(path.join(HUB, 'apps.json'), 'utf8')).find((a) => a.id === 'shorts');
