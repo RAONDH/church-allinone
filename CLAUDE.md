@@ -33,4 +33,5 @@
 - 예제 자료와 실제 교회 자료를 명확히 구분합니다. 예제는 `?ws=sample`이고 가상 예배송출을 씁니다.
 - 외부 비용 지출, 실제 외부 배포(릴리스·푸시), 데이터 삭제, 필수 계정 정보처럼 사용자 결정이 필요한 것만 묻습니다.
 - git 커밋에는 사용자 이메일을 쓰지 않습니다. noreply 주소를 씁니다.
-- 배포 순서: 버전 올리기 → `npm run verify` → `installer/make-package.sh`·`make-windows.sh`·`make-update.sh` → `SHA256SUMS.txt` → 릴리스(맥·윈도우·업데이트 묶음 + SHA256SUMS). 자세한 것은 README의 '개발자용'에 있습니다.
+- 배포 순서: 버전 올리기 → `installer/make-release.sh`(전체 점검 → 맥·윈도우·업데이트 묶음 → `SHA256SUMS.txt` → 서명 `.sig` → 서명 확인) → 릴리스에 다섯 파일 올리기. 자세한 것은 README의 '개발자용'에 있습니다.
+- 자동 업데이트 서명의 비밀 열쇠(`~/.raon-workspace/signing/church-allinone-update.key`)는 저장소에 절대 넣지 않습니다. 이미 있으면 새로 만들지 않습니다(새로 만들면 설치된 프로그램이 새 릴리스를 믿지 못함).

@@ -1,6 +1,7 @@
 // 새 버전 알림과 자동 설치.
 // - 6시간에 한 번 GitHub Releases 의 latest 를 보고, 지금보다 새 버전이면 화면에 알린다.
-// - 설치: 우리 저장소의 releases/download/ 에서 업데이트 묶음과 SHA256SUMS.txt 를 받아 확인값이 맞을 때만,
+// - 설치: 우리 저장소의 releases/download/ 에서 업데이트 묶음과 SHA256SUMS.txt·SHA256SUMS.txt.sig 를 받아
+//   ① 확인값 목록의 서명(Ed25519)이 프로그램에 든 공개 열쇠(update-keys.mjs)와 맞고 ② 묶음의 확인값이 그 목록과 같을 때만,
 //   사용자 자료를 한 벌 백업한 뒤 자료 폴더의 app-update/버전 에 풀고, 다 풀린 뒤에야 current.json 을 바꾼다.
 //   (맥 .app 이나 앱 폴더의 파일은 고치지 않는다)
 // - 다시 켜기: 옛 본체가 문을 닫고 새 본체를 띄워, 새 본체가 준비되면 옛 본체가 끝난다. 안 켜지면 되돌린다.
@@ -9,6 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { cmpVer } from './boot.mjs';
+import { TRUSTED_KEYS } from './update-keys.mjs';
 
 const REPO = 'raon-easypaster/church-allinone';
 // 시험할 때만 가짜 배포 서버를 쓸 수 있게 환경 변수로 바꿀 수 있다 (이 컴퓨터에서 켤 때 정하는 값)
@@ -16,6 +18,19 @@ const LATEST_URL = process.env.UPDATE_LATEST_URL || `https://api.github.com/repo
 const ALLOWED = process.env.UPDATE_ALLOWED_PREFIX || `https://github.com/${REPO}/releases/download/`;
 export const ASSET = 'ChurchAllInOne-update.zip';
 const SUMS = 'SHA256SUMS.txt';
+const SIG = 'SHA256SUMS.txt.sig';
+// 시험(하네스)에서만 가짜 배포 서버의 시험 열쇠를 더 믿게 할 수 있다 (이 컴퓨터에서 켤 때 정하는 값)
+const KEYS = [...TRUSTED_KEYS, ...String(process.env.UPDATE_EXTRA_KEYS || '').split(',').map((k) => k.trim()).filter(Boolean)];
+
+/** 확인값 목록(SHA256SUMS.txt)의 서명이 믿는 공개 열쇠 가운데 하나와 맞는지 */
+export function verifySums(sumsBytes, sigText, keys = KEYS) {
+  let sig;
+  try { sig = Buffer.from(String(sigText || '').trim(), 'base64'); } catch { return false; }
+  if (sig.length !== 64) return false;
+  return keys.some((k) => {
+    try { return crypto.verify(null, Buffer.from(sumsBytes), crypto.createPublicKey({ key: Buffer.from(k, 'base64'), format: 'der', type: 'spki' }), sig); } catch { return false; }
+  });
+}
 const CHECK_EVERY = 6 * 3600e3;
 const SNOOZE = 24 * 3600e3;
 const MAX_SIZE = 150e6;
@@ -110,11 +125,11 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
         const r = await fetch(LATEST_URL, { signal: AbortSignal.timeout(15000), headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'church-allinone-updater' } });
         if (!r.ok) throw new Error(`GitHub 응답 ${r.status}`);
         const j = await r.json();
-        const asset = (j.assets || []).find((a) => a.name === ASSET), sums = (j.assets || []).find((a) => a.name === SUMS);
+        const asset = (j.assets || []).find((a) => a.name === ASSET), sums = (j.assets || []).find((a) => a.name === SUMS), sig = (j.assets || []).find((a) => a.name === SIG);
         saved.latest = {
           version: String(j.tag_name || '').replace(/^v/, ''), url: String(j.html_url || `https://github.com/${REPO}/releases/latest`),
           notes: notesExcerpt(j.body), name: String(j.name || ''),
-          asset: asset?.browser_download_url || '', sums: sums?.browser_download_url || '',
+          asset: asset?.browser_download_url || '', sums: sums?.browser_download_url || '', sig: sig?.browser_download_url || '',
         };
         saved.checkError = '';
       } catch (e) { saved.checkError = e.cause ? '인터넷에 연결하지 못했습니다.' : e.message; }
@@ -126,7 +141,7 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
   function view() {
     const l = saved.latest;
     const newer = !!l?.version && cmpVer(l.version, version) > 0;
-    const installable = newer && allowedStart(l.asset) && allowedStart(l.sums);
+    const installable = newer && allowedStart(l.asset) && allowedStart(l.sums) && allowedStart(l.sig) && KEYS.length > 0;
     const snoozed = !!(saved.snooze && l && saved.snooze.version === l.version && saved.snooze.until > Date.now());
     return { current: version, latest: newer ? { version: l.version, url: l.url, notes: l.notes, name: l.name } : null, available: newer, installable, snoozed, notify: saved.notify !== false, checkedAt: saved.checkedAt || 0, checkError: saved.checkError || '', busy: isBusy(), job };
   }
@@ -142,11 +157,18 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
       const l = saved.latest;
       if (!l?.version || cmpVer(l.version, version) <= 0) throw bad('설치할 새 버전이 없습니다.');
       if (!allowedStart(l.asset) || !allowedStart(l.sums)) throw bad('이 버전에는 자동 설치 묶음이 없습니다. GitHub에서 직접 받아 설치해 주세요.');
+      if (!allowedStart(l.sig)) throw bad('이 버전에는 서명 파일(SHA256SUMS.txt.sig)이 없어 자동 설치하지 않습니다. GitHub에서 직접 받아 설치해 주세요.');
       const ver = l.version.replace(/[^\w.-]/g, '');
       job.version = ver;
       tmp = path.join(dir, `${ver}.tmp`); dl = path.join(dir, `${ver}.download`);
       fs.mkdirSync(dir, { recursive: true });
-      const sum = sumFor(await (await get(l.sums, { timeout: 30000 })).text(), ASSET);
+      // ① 서명 확인: 확인값 목록이 우리가 서명한 그대로인지 (릴리스 파일을 누가 바꿔치기해도 비밀 열쇠 없이는 서명을 못 만든다)
+      const sumsBytes = Buffer.from(await (await get(l.sums, { timeout: 30000 })).arrayBuffer());
+      if (sumsBytes.length > 64e3) throw bad('확인값 목록이 너무 큽니다.');
+      const sigText = (await (await get(l.sig, { timeout: 30000 })).text()).slice(0, 1000);
+      if (!verifySums(sumsBytes, sigText)) throw bad('서명이 맞지 않아 설치하지 않았습니다. 공식 릴리스가 아니거나 파일이 바뀌었을 수 있습니다. GitHub에서 직접 받아 설치해 주세요.');
+      // ② 확인값: 받은 묶음이 서명된 목록의 값과 같은지
+      const sum = sumFor(sumsBytes.toString('utf8'), ASSET);
       if (!sum) throw bad('확인값 목록(SHA256SUMS.txt)에 업데이트 묶음이 없어 설치하지 않았습니다.');
       const r = await get(l.asset);
       job.total = +r.headers.get('content-length') || 0;

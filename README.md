@@ -169,11 +169,15 @@ npm install && npm run build && npm start   # http://localhost:5191
   - 자료는 `%APPDATA%\ChurchAllInOne`(예배송출은 `%APPDATA%\WorshipCaster`)에 저장되어 폴더를 바꿔도 남습니다.
   - 윈도우에서는 `apps.json`의 `win` 설정으로 켭니다. 설교 쇼츠 메이커는 설치 파일로 설치한 뒤 자기 창으로 열리고(`exe`·`installer`), HWP 변환기는 `start-hub.cmd`로 켭니다.
 - **자동 업데이트 묶음** `installer/make-update.sh [만들 위치]` → `ChurchAllInOne-update.zip` (맥·윈도우 공통: `server`·빌드된 `dist`·`apps.json`·`package.json`).
-  - 프로그램은 6시간마다 [Releases latest](https://github.com/raon-easypaster/church-allinone/releases/latest)를 확인합니다. 이 파일과 `SHA256SUMS.txt`가 릴리스에 있어야 자동 설치합니다.
-  - 받는 주소는 이 저장소의 `releases/download/`로만 제한합니다. 확인값이 맞을 때만 자료를 백업하고, 자료 폴더 `app-update/버전`에 다 푼 뒤 `current.json`을 바꿉니다.
+  - 프로그램은 6시간마다 [Releases latest](https://github.com/raon-easypaster/church-allinone/releases/latest)를 확인합니다. 이 파일과 `SHA256SUMS.txt`, 그 서명 `SHA256SUMS.txt.sig`가 릴리스에 있어야 자동 설치합니다.
+  - **서명 확인**: 확인값 목록(`SHA256SUMS.txt`)에 Ed25519로 서명합니다. 프로그램은 `server/update-keys.mjs`에 든 공개 열쇠로 서명을 먼저 확인하고, 맞지 않으면 설치하지 않습니다. 릴리스 파일과 확인값 목록을 함께 바꿔치기해도, 비밀 열쇠가 없으면 서명을 만들 수 없습니다.
+    - 비밀 열쇠는 저장소에 넣지 않고 배포하는 맥의 `~/.raon-workspace/signing/church-allinone-update.key`에만 둡니다. 처음 한 번 `node installer/signing.mjs keygen`으로 만듭니다.
+    - **비밀 열쇠를 잃어버리면** 이미 설치된 프로그램이 새 릴리스를 자동 설치하지 못합니다. 그때는 새 열쇠를 만들어 새 버전을 사용자가 직접 한 번 설치해야 합니다. 그러니 USB나 암호 관리 프로그램 등에 따로 보관하세요.
+    - 열쇠를 바꿀 때는 새 공개 열쇠를 `update-keys.mjs`에 더하고, 옛 열쇠로 설치된 프로그램이 모두 새 버전으로 바뀐 뒤에 옛 열쇠를 뺍니다.
+  - 받는 주소는 이 저장소의 `releases/download/`로만 제한합니다. 서명과 확인값이 맞을 때만 자료를 백업하고, 자료 폴더 `app-update/버전`에 다 푼 뒤 `current.json`을 바꿉니다.
   - 켤 때 `server/index.mjs`(시작 파일, `server/boot.mjs`)가 앱보다 새 버전이 받아져 있으면 그 `main.mjs`를 켭니다. 켜지 못하면 치우고 앱에 든 버전으로 켭니다. 앱이 더 새것이면 받아 둔 것은 지웁니다.
   - 맥 `.app`이나 앱 폴더의 파일은 고치지 않습니다.
-- 배포 순서: `package.json` 버전 올리기 → `npm run verify`(가짜 배포 서버로 자동 설치까지 점검) → 세 묶음 만들기(맥 묶음은 `ChurchAllInOne-mac.zip`으로 이름 바꿈) → 세 파일의 `SHA256SUMS.txt` → 릴리스에 네 파일 올리기.
+- 배포 순서: `package.json` 버전 올리기 → **`installer/make-release.sh`** 한 번 (전체 점검 → 세 묶음 → `SHA256SUMS.txt` → 서명 `SHA256SUMS.txt.sig` → 서명 다시 확인) → 릴리스에 다섯 파일 올리기.
 
 ### 앞으로
 

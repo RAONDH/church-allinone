@@ -1,4 +1,4 @@
-// 새 버전 자동 설치 점검: 가짜 배포 서버로 받기 → 확인값 틀리면 거절 → 맞으면 설치 → 새 버전으로 다시 켜짐 → 자료 그대로
+// 새 버전 자동 설치 점검: 가짜 배포 서버로 받기 → 서명·확인값 틀리면 거절 → 맞으면 설치 → 새 버전으로 다시 켜짐 → 자료 그대로
 import { afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,9 @@ import { spawn, type ChildProcess } from 'node:child_process';
 // @ts-ignore 서버 모듈은 JS
 import { cmpVer, pickRuntime } from '../server/boot.mjs';
 // @ts-ignore 서버 모듈은 JS
-import { sumFor, unzip, notesExcerpt } from '../server/update.mjs';
+import { sumFor, unzip, notesExcerpt, verifySums } from '../server/update.mjs';
+// @ts-ignore 서버 모듈은 JS
+import { TRUSTED_KEYS } from '../server/update-keys.mjs';
 
 const HUB = path.resolve(__dirname, '..');
 const BUNDLED = JSON.parse(fs.readFileSync(path.join(HUB, 'package.json'), 'utf8')).version;
@@ -61,6 +63,22 @@ describe('업데이트 · 작은 부품', () => {
     expect(sumFor(t, 'ChurchAllInOne-update.zip')).toBe('b'.repeat(64));
     expect(sumFor(t, 'nope.zip')).toBe('');
   });
+  it('서명 확인: 믿는 열쇠의 서명만 통과, 한 글자만 바꿔도 거절', () => {
+    const k = crypto.generateKeyPairSync('ed25519'), other = crypto.generateKeyPairSync('ed25519');
+    const pub = k.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    const text = Buffer.from(`${'a'.repeat(64)}  ChurchAllInOne-update.zip\n`);
+    const sig = crypto.sign(null, text, k.privateKey).toString('base64');
+    expect(verifySums(text, sig, [pub])).toBe(true);
+    expect(verifySums(text, `${sig}\n`, [pub])).toBe(true);   // 끝 줄바꿈은 괜찮음
+    expect(verifySums(Buffer.from(text.toString().replace('a', 'b')), sig, [pub])).toBe(false);
+    expect(verifySums(text, crypto.sign(null, text, other.privateKey).toString('base64'), [pub])).toBe(false);
+    expect(verifySums(text, '', [pub])).toBe(false);
+    expect(verifySums(text, sig, [])).toBe(false);
+  });
+  it('프로그램에 공개 열쇠가 들어 있다 (없으면 자동 설치가 모두 거절됨)', () => {
+    expect(TRUSTED_KEYS.length).toBeGreaterThan(0);
+    for (const k of TRUSTED_KEYS) expect(crypto.createPublicKey({ key: Buffer.from(k, 'base64'), format: 'der', type: 'spki' }).asymmetricKeyType).toBe('ed25519');
+  });
   it('묶음 밖으로 나가는 파일 이름은 거절', () => {
     const d = tmp('zip'); cleanup.push(() => fs.rmSync(d, { recursive: true, force: true }));
     expect(() => unzip(zip({ '../evil.txt': Buffer.from('x') }), d)).toThrow(/허용되지 않은/);
@@ -86,18 +104,30 @@ describe('업데이트 · 작은 부품', () => {
 });
 
 describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
-  it('확인값 틀리면 거절 → 맞으면 설치 → 새 버전으로 다시 켜짐 → 자료 그대로 → 망가진 버전은 앱 버전으로', async () => {
+  it('서명 없음·남의 서명·바뀐 목록·확인값 틀림은 거절 → 맞으면 설치 → 새 버전으로 다시 켜짐 → 자료 그대로 → 망가진 버전은 앱 버전으로', async () => {
     const NEW = '9.9.9';
     const app = tmp('app'), data = tmp('data');
     cleanup.push(() => { fs.rmSync(app, { recursive: true, force: true }); fs.rmSync(data, { recursive: true, force: true }); });
     writeApp(app, appFiles(BUNDLED));
     const pkg = zip(appFiles(NEW));
     const goodSum = crypto.createHash('sha256').update(pkg).digest('hex');
-    let wrong = true;
+    // 시험용 서명 열쇠(믿음)와 남의 열쇠(안 믿음). 프로그램에는 UPDATE_EXTRA_KEYS 로 시험 열쇠만 알려 준다
+    const ours = crypto.generateKeyPairSync('ed25519'), theirs = crypto.generateKeyPairSync('ed25519');
+    const pubB64 = ours.publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+    const sumsText = (sum: string) => `${sum}  ChurchAllInOne-update.zip\r\n`;
+    const sign = (text: string, key = ours.privateKey) => crypto.sign(null, Buffer.from(text), key).toString('base64');
+    // nosig: 서명 파일 없음 · badkey: 남의 열쇠로 서명 · tampered: 서명한 뒤 목록을 바꿈 · wrongsum: 서명은 맞지만 확인값이 다름 · good
+    let mode: 'nosig' | 'badkey' | 'tampered' | 'wrongsum' | 'good' = 'nosig';
     const rel = http.createServer((req, res) => {
       const base = `http://127.0.0.1:${(rel.address() as net.AddressInfo).port}`;
-      if (req.url === '/latest') return res.end(JSON.stringify({ tag_name: `v${NEW}`, name: `v${NEW}`, html_url: `${base}/page`, body: '## 시험 버전\n- 바뀐 것\n\n### 받기\n| 파일 | 내용 |', assets: [{ name: 'ChurchAllInOne-update.zip', browser_download_url: `${base}/releases/download/v${NEW}/ChurchAllInOne-update.zip` }, { name: 'SHA256SUMS.txt', browser_download_url: `${base}/releases/download/v${NEW}/SHA256SUMS.txt` }] }));
-      if (req.url?.endsWith('/SHA256SUMS.txt')) return res.end(`${wrong ? '0'.repeat(64) : goodSum}  ChurchAllInOne-update.zip\r\n`);
+      if (req.url === '/latest') return res.end(JSON.stringify({ tag_name: `v${NEW}`, name: `v${NEW}`, html_url: `${base}/page`, body: '## 시험 버전\n- 바뀐 것\n\n### 받기\n| 파일 | 내용 |', assets: [{ name: 'ChurchAllInOne-update.zip', browser_download_url: `${base}/releases/download/v${NEW}/ChurchAllInOne-update.zip` }, { name: 'SHA256SUMS.txt', browser_download_url: `${base}/releases/download/v${NEW}/SHA256SUMS.txt` },
+        ...(mode === 'nosig' ? [] : [{ name: 'SHA256SUMS.txt.sig', browser_download_url: `${base}/releases/download/v${NEW}/SHA256SUMS.txt.sig` }])] }));
+      if (req.url?.endsWith('/SHA256SUMS.txt')) return res.end(sumsText(mode === 'wrongsum' ? '0'.repeat(64) : goodSum));
+      if (req.url?.endsWith('/SHA256SUMS.txt.sig')) {
+        if (mode === 'badkey') return res.end(sign(sumsText(goodSum), theirs.privateKey));
+        if (mode === 'tampered') return res.end(sign(sumsText('1'.repeat(64))));   // 서명은 다른 목록에 대한 것
+        return res.end(sign(sumsText(mode === 'wrongsum' ? '0'.repeat(64) : goodSum)));
+      }
       if (req.url?.endsWith('/ChurchAllInOne-update.zip')) { res.setHeader('Content-Length', pkg.length); return res.end(pkg); }
       res.statusCode = 404; res.end();
     });
@@ -106,7 +136,7 @@ describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
     const relBase = `http://127.0.0.1:${(rel.address() as net.AddressInfo).port}`;
     const port = await freePort();
     const H = `http://127.0.0.1:${port}`;
-    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/` };
+    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/`, UPDATE_EXTRA_KEYS: pubB64 };
     delete (env as any).HUB_APP_ROOT; delete (env as any).BUNDLE_DIR;
     const pids = new Set<number>();
     cleanup.push(() => { for (const p of pids) try { process.kill(p); } catch { /* 이미 끝남 */ } });
@@ -117,19 +147,29 @@ describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
     expect(h1.version).toBe(BUNDLED);
     await j(`${H}/api/ws/real/church`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '시험교회', pastor: '시험 목사' }) });
 
-    const v = await j(`${H}/api/update?force=1`);
-    expect(v).toMatchObject({ available: true, installable: true, latest: { version: NEW } });
-    expect(v.latest.notes).toBe('## 시험 버전\n- 바뀐 것');
+    // 0) 서명 파일이 없는 릴리스는 자동 설치할 수 없다고 알린다
+    const v0 = await j(`${H}/api/update?force=1`);
+    expect(v0).toMatchObject({ available: true, installable: false, latest: { version: NEW } });
+    expect(v0.latest.notes).toBe('## 시험 버전\n- 바뀐 것');
+    const tryInstall = async () => {
+      await j(`${H}/api/update/install`, { method: 'POST' });
+      const x = await waitFor(async () => { const y = await j(`${H}/api/update`); return y.job.phase === 'error' ? y : undefined; });
+      expect(fs.existsSync(path.join(data, 'app-update', 'current.json'))).toBe(false);
+      expect((await j(`${H}/api/health`)).version).toBe(BUNDLED);
+      return x.job.error as string;
+    };
+    expect(await tryInstall()).toMatch(/서명 파일/);
+    mode = 'good';
+    expect((await j(`${H}/api/update?force=1`)).installable).toBe(true);
 
-    // 1) 확인값이 틀리면 설치하지 않는다
-    await j(`${H}/api/update/install`, { method: 'POST' });
-    const bad = await waitFor(async () => { const x = await j(`${H}/api/update`); return x.job.phase === 'error' ? x : undefined; });
-    expect(bad.job.error).toMatch(/확인값/);
-    expect(fs.existsSync(path.join(data, 'app-update', 'current.json'))).toBe(false);
-    expect((await j(`${H}/api/health`)).version).toBe(BUNDLED);
+    // 1) 남의 열쇠로 서명했거나, 서명한 뒤 목록을 바꿨으면 설치하지 않는다
+    mode = 'badkey'; expect(await tryInstall()).toMatch(/서명이 맞지 않아/);
+    mode = 'tampered'; expect(await tryInstall()).toMatch(/서명이 맞지 않아/);
+    // 2) 서명은 맞아도 받은 묶음의 확인값이 목록과 다르면 설치하지 않는다
+    mode = 'wrongsum'; expect(await tryInstall()).toMatch(/확인값/);
 
-    // 2) 맞으면 설치하고 새 버전으로 다시 켜진다 (옛 본체는 끝남)
-    wrong = false;
+    // 3) 서명과 확인값이 모두 맞으면 설치하고 새 버전으로 다시 켜진다 (옛 본체는 끝남)
+    mode = 'good';
     await j(`${H}/api/update/install`, { method: 'POST' });
     const h2 = await waitFor(async () => { const h = await j(`${H}/api/health`); return h.version === NEW ? h : undefined; }, 45000);
     pids.add(h2.pid);
