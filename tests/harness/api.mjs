@@ -1,0 +1,265 @@
+// 서버·API 점검: 시험 서버에 실제로 요청을 보내 결과 값을 확인한다.
+import fs from 'node:fs';
+import path from 'node:path';
+import { startHub, runChecks, eq, ok, has, expectStatus, fakeServer, json, tmpDir, sleep } from './lib.mjs';
+
+const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+const R = '/api/ws/real', S = '/api/ws/sample';
+const waitFor = async (fn, ms = 20000) => { const end = Date.now() + ms; while (Date.now() < end) { const v = await fn(); if (v) return v; await sleep(200); } throw new Error('기다려도 끝나지 않았습니다'); };
+
+export async function runApi() {
+  // 가짜 바깥 서비스: GitHub 릴리스, '프로그램' 목록에 나올 가짜 프로그램
+  const gh = await fakeServer({ '/latest': json({ tag_name: 'v9.9.9', name: 'v9.9.9', html_url: 'https://example.invalid/r', body: '## 시험\n- 바뀐 것\n### 받기\n| 파일 | 내용 |', assets: [] }) });
+  const fakeApp = await fakeServer({ '*': (q, r) => r.end('ok') });
+  const appDir = tmpDir('fakeapp');
+  const appsFile = path.join(appDir, 'apps.json');
+  fs.writeFileSync(appsFile, JSON.stringify([
+    { id: 'fake', name: '가짜 프로그램', desc: '시험', icon: '🧪', color: '#000', port: fakeApp.port, dir: appDir, start: 'true' },
+    { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true' },
+  ]));
+  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile } });
+  const { get, post, put, del } = hub;
+  const ctx = {};
+  try {
+    return await runChecks('서버·API 점검', [
+      ['서버: 켜지면 상태 확인에 버전이 나온다', async () => {
+        const h = expectStatus(await get('/api/health'), 200, '상태 확인');
+        ok(/^\d+\.\d+\.\d+$/.test(h.version), '버전 모양이 0.0.0 이어야 함', h.version);
+      }],
+      ['보안: 다른 사이트에서 온 요청과 localhost가 아닌 주소는 막는다', async () => {
+        expectStatus(await get(`${R}`, { Origin: 'https://evil.example' }), 403, '다른 사이트 Origin');
+        expectStatus(await hub.rawGet(R, { Host: 'evil.example' }), 403, '다른 Host (DNS 재바인딩 막기)');
+      }],
+      ['교회 정보: 처음엔 비어 있고, 저장하면 이름·목회자·신학 관점이 남는다', async () => {
+        eq((await get(R)).data.church ?? null, null, '처음 교회 정보');
+        expectStatus(await put(`${R}/church`, { name: '' }), 400, '이름 없이 저장하면 거절');
+        await put(`${R}/church`, { name: '시험교회', pastor: '시험 목사', defaultServiceName: '주일 예배', theology: '웨슬리안' });
+        const c = (await get(R)).data.church;
+        eq([c.name, c.pastor, c.theology], ['시험교회', '시험 목사', '웨슬리안'], '저장된 교회 정보');
+      }],
+      ['이번 주 준비함: 예배를 만들면 목록에 보인다', async () => {
+        const r = expectStatus(await post(`${R}/weeks`, { date: today, name: '주일 예배', wcMode: 'none' }), 200, '예배 만들기');
+        ctx.week = r.week.id;
+        ok((await get(R)).data.weeks.some((w) => w.id === ctx.week), '목록에 새 예배가 있어야 함');
+        expectStatus(await post(`${R}/weeks`, { date: '' }), 400, '날짜 없이 만들면 거절');
+      }],
+      ['예배 정보: 본문·제목·광고·원고를 고치면 저장된다 (예배송출이 꺼져 있어도 먼저 저장)', async () => {
+        const r = expectStatus(await put(`${R}/weeks/${ctx.week}`, { passage: '시편 23:1-6', sermonTitle: '목자', announcements: ['광고 하나'], sermonNotes: '짧은 원고' }), 200, '예배 정보 저장');
+        ok(r.sync.skipped || r.sync.ok === false, '예배송출과 연결되지 않은 예배는 동기화를 건너뜀', r.sync);
+        const w = (await get(`${R}/weeks/${ctx.week}`)).data.week;
+        eq([w.passage, w.sermonTitle, w.announcements, w.sermonNotes], ['시편 23:1-6', '목자', ['광고 하나'], '짧은 원고'], '다시 읽은 예배 정보');
+      }],
+      ['설교 후 자료: 실제 자료에서 원고가 300자보다 짧으면 만들지 않는다', async () => {
+        const r = await post(`${R}/weeks/${ctx.week}/after/summary`, {});
+        eq(r.status, 400, '짧은 원고로 만들기');
+        has(r.data.error, '300자', '안내 문구');
+      }],
+      ['예제: 예제 자료가 준비되어 있다 (교회·예배·성도·재정·봉사표)', async () => {
+        const o = (await get(S)).data;
+        ok(o.church?.name && o.weeks.length > 0, '예제 교회·예배', o.church);
+        ok((await get(`${S}/people`)).data.members.length >= 5, '예제 성도');
+        ok((await get(`${S}/finance`)).data.tx.length > 0, '예제 장부');
+        ok((await get(`${S}/admin`)).data.serve.roles.length > 0, '예제 봉사표');
+        ctx.sw = o.weeks.find((w) => w.wc?.serviceId)?.id;
+        ok(ctx.sw, '예배송출과 연결된 예제 예배');
+      }],
+      ['찬양 자료(예제): 곡 목록이 나오고 작사·작곡 메모가 저장된다', async () => {
+        const r = (await get(`${S}/songs`)).data;
+        ok(r.ok && r.songs.length > 0, '곡 목록', r);
+        ctx.song = r.songs[0].id;
+        await put(`${S}/songs/${ctx.song}/meta`, { writer: '시험 작곡가', source: '시험 출처', distinguish: '' });
+        eq((await get(`${S}/songs`)).data.songs.find((s) => s.id === ctx.song).meta.writer, '시험 작곡가', '저장된 작사·작곡');
+      }],
+      ['콘티(예제): 곡 넣기·조성·순서 바꾸기·빼기', async () => {
+        const songsOf = (st) => st.summary.items.filter((i) => i.type === 'song' || i.type === 'score');
+        const before = songsOf((await get(`${S}/weeks/${ctx.sw}`)).data.status);
+        const candidate = (await get(`${S}/songs`)).data.songs.find((s) => !before.some((b) => b.id === s.id));
+        ok(candidate, '넣을 곡');
+        let st = expectStatus(await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'add', itemId: candidate.id }), 200, '곡 넣기');
+        ok(songsOf(st).some((s) => s.id === candidate.id), '콘티에 넣은 곡이 있어야 함', songsOf(st).map((s) => s.title));
+        st = (await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'item', itemId: candidate.id, key: 'G' })).data;
+        eq(songsOf(st).find((s) => s.id === candidate.id).key, 'G', '조성');
+        const order = songsOf(st).map((s) => s.id);
+        st = (await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'move', itemId: candidate.id, dir: -1, songsOnly: true })).data;
+        if (order.length > 1) ok(songsOf(st).map((s) => s.id).indexOf(candidate.id) === order.indexOf(candidate.id) - 1, '한 칸 위로', songsOf(st).map((s) => s.title));
+        st = (await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'remove', itemId: candidate.id })).data;
+        ok(!songsOf(st).some((s) => s.id === candidate.id), '뺀 곡은 없어야 함');
+      }],
+      ['자막 확정(예제): 확정본을 떠 두고, 바뀐 뒤 확정본으로 되돌린다', async () => {
+        const f = expectStatus(await post(`${S}/weeks/${ctx.sw}/finalize`, {}), 200, '확정');
+        ok(f.week.final?.snap?.items?.length > 0, '확정본 자료');
+        const song = f.week.final.snap.items.find((i) => i.type === 'song');
+        ok(song, '확정본 안의 곡');
+        await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'item', itemId: song.id, key: 'Bb' });
+        const changed = (await get(`${S}/weeks/${ctx.sw}`)).data.status;
+        ok(changed.final && changed.final.changed !== false, '확정 뒤 바뀐 것을 알아야 함', changed.final);
+        const r = expectStatus(await post(`${S}/weeks/${ctx.sw}/restore`, {}), 200, '확정본으로 되돌리기');
+        eq(r.week.final.snap.items.find((i) => i.id === song.id)?.key ?? song.key, song.key, '되돌린 조성');
+      }],
+      ['설교 후 자료(예제): 9가지를 모두 만들고, 웹페이지는 따로 떨어진 상자(sandbox)로 연다', async () => {
+        const st0 = (await get(`${S}/weeks/${ctx.sw}/after`)).data;
+        const kinds = ['infographic', 'cards', 'summary', 'blog', 'sg-adult', 'sg-youth', 'qt', 'family', 'review'];
+        ok(st0.ai?.provider === 'sample', '예제는 AI를 부르지 않음', st0.ai);
+        for (const k of kinds) expectStatus(await post(`${S}/weeks/${ctx.sw}/after/${k}`, {}), 200, `${k} 만들기`);
+        const done = await waitFor(async () => { const s = (await get(`${S}/weeks/${ctx.sw}/after`)).data; return kinds.every((k) => s.docs[k]) && !Object.keys(s.running).length ? s : null; }, 40000);
+        eq(kinds.filter((k) => !done.docs[k]), [], '만들어지지 않은 자료');
+        const v = await get(`${S}/weeks/${ctx.sw}/after/cards/view`);
+        has(v.headers.get('content-security-policy'), 'sandbox', '웹페이지 보안 머리글');
+        has(v.headers.get('content-security-policy'), 'allow-downloads', '카드 그림 저장 허용');
+        has(v.data, "createElement('canvas')", '카드뉴스 그림 그리기');
+        has((await get(`${S}/weeks/${ctx.sw}/after/summary/view`)).data, '# 주보용 설교 요약', '주보 요약 글');
+        expectStatus(await post(`${S}/weeks/${ctx.sw}/after/shorts`, {}), 404, '빼기로 한 쇼츠 대본은 없음');
+      }],
+      ['성도: 추가·고치기·가족 묶기·지우기', async () => {
+        const a = expectStatus(await post(`${R}/members`, { name: '김시험', birth: '1970-05-05', phone: '010-0000-0000', baptism: '세례', address: '시험시 1' }), 200, '성도 추가').member;
+        const b = (await post(`${R}/members`, { name: '이시험', familyWith: a.id, relation: '배우자' })).data.member;
+        const p = (await get(`${R}/people`)).data;
+        eq(p.members.find((m) => m.id === a.id).familyId === p.members.find((m) => m.id === b.id).familyId && !!p.members.find((m) => m.id === b.id).familyId, true, '같은 가족으로 묶임');
+        await put(`${R}/members/${a.id}`, { ...p.members.find((m) => m.id === a.id), role: '집사' });
+        eq((await get(`${R}/people`)).data.members.find((m) => m.id === a.id).role, '집사', '고친 직분');
+        expectStatus(await post(`${R}/members`, { name: '' }), 400, '이름 없이 추가하면 거절');
+        ctx.kim = a.id; ctx.lee = b.id;
+      }],
+      ['성도: 엑셀에서 붙여 넣은 여러 분을 한 번에 (같은 가족 글자는 한 가족)', async () => {
+        const r = expectStatus(await post(`${R}/members/bulk`, { rows: [{ name: '박하나', family: '박' }, { name: '박둘', family: '박' }, { name: '' }] }), 200, '여러 명 넣기');
+        eq(r.added, 2, '넣은 수');
+        const ms = (await get(`${R}/people`)).data.members.filter((m) => m.name.startsWith('박'));
+        eq(ms[0].familyId && ms[0].familyId === ms[1].familyId, true, '한 가족');
+      }],
+      ['심방: 다녀온 기록과 예정을 넣고 지운다', async () => {
+        const v = expectStatus(await post(`${R}/visits`, { memberIds: [ctx.kim], date: today, kind: '심방', planned: true, note: '시험 심방' }), 200, '심방 넣기');
+        const id = v.visit?.id || v.item?.id || (await get(`${R}/people`)).data.visits[0].id;
+        ok((await get(`${R}/people`)).data.visits.some((x) => x.id === id && x.planned), '예정 심방');
+        await del(`${R}/visits/${id}`);
+        ok(!(await get(`${R}/people`)).data.visits.some((x) => x.id === id), '지운 심방은 없어야 함');
+      }],
+      ['출석: 날짜별로 저장하고, 아무도 없으면 그날 기록을 없앤다', async () => {
+        await put(`${R}/attendance/${today}`, { memberIds: [ctx.kim, 'no-such-id'] });
+        eq((await get(`${R}/people`)).data.attendance[today], [ctx.kim], '저장된 출석 (없는 번호는 뺌)');
+        await put(`${R}/attendance/${today}`, { memberIds: [] });
+        eq((await get(`${R}/people`)).data.attendance[today] ?? null, null, '빈 날 기록');
+      }],
+      ['성도 명부 CSV: 한글이 깨지지 않게(BOM) 하고, = 로 시작하는 칸은 수식으로 실행되지 않게 막는다', async () => {
+        await post(`${R}/members`, { name: '=HYPERLINK("x")' });
+        const t = (await get(`${R}/people/export.csv`)).data;
+        eq(t.charCodeAt(0), 0xfeff, '첫 글자 BOM');
+        has(t, `'=HYPERLINK`, '수식 막기');
+      }],
+      ['재정: 여러 줄 입력·고치기·지우기, 이름이 하나뿐인 성도와 이어진다', async () => {
+        const r = expectStatus(await post(`${R}/finance/tx`, { rows: [
+          { date: today, type: 'income', fund: '일반재정', category: '십일조', name: '김시험', amount: '100,000' },
+          { date: today, type: 'expense', fund: '일반재정', category: '시험지출', amount: 5000 },
+        ] }), 200, '장부 입력');
+        eq(r.added.length, 2, '넣은 줄 수');
+        eq(r.added[0].memberId, ctx.kim, '성도와 이어짐');
+        eq(r.added[0].amount, 100000, '금액 숫자로');
+        expectStatus(await post(`${R}/finance/tx`, { rows: [{ date: today, category: '십일조', amount: 0 }] }), 400, '0원은 거절');
+        const id = r.added[1].id;
+        await put(`${R}/finance/tx/${id}`, { ...r.added[1], amount: 7000 });
+        eq((await get(`${R}/finance`)).data.tx.find((t) => t.id === id).amount, 7000, '고친 금액');
+        await del(`${R}/finance/tx/${id}`);
+        ok(!(await get(`${R}/finance`)).data.tx.some((t) => t.id === id), '지운 기록은 없어야 함');
+      }],
+      ['재정: 항목 추가·이름 바꾸기 (이미 적은 장부도 함께 바뀜)', async () => {
+        await post(`${R}/finance/category`, { op: 'add', type: 'income', fund: '일반재정', name: '시험헌금' });
+        await post(`${R}/finance/tx`, { rows: [{ date: today, type: 'income', fund: '일반재정', category: '시험헌금', amount: 1000 }] });
+        const r = (await post(`${R}/finance/category`, { op: 'rename', type: 'income', fund: '일반재정', name: '시험헌금', to: '바뀐헌금' })).data;
+        eq(r.count, 1, '함께 바뀐 장부 수');
+        ok(r.settings.categories.income['일반재정'].includes('바뀐헌금'), '바뀐 항목 이름');
+      }],
+      ['재정: 예산 저장, CSV 내보내기, 예전 회계장부를 두 번 가져와도 겹치지 않는다', async () => {
+        const y = today.slice(0, 4);
+        eq((await put(`${R}/finance/budgets/${y}`, { budgets: { 십일조: '1,000,000', 빈칸: 0 } })).data.budgets, { 십일조: 1000000 }, '저장된 예산');
+        eq((await get(`${R}/finance/export.csv?year=${y}`)).data.charCodeAt(0), 0xfeff, 'CSV BOM');
+        const ledger = { transactions: [{ id: 1, date: today, type: 'income', category: '감사헌금', amount: 30000, name: '이시험' }], budgets: {} };
+        const a = (await post(`${R}/finance/import`, ledger)).data, b = (await post(`${R}/finance/import`, ledger)).data;
+        eq([a.added, b.added], [1, 0], '두 번 가져온 결과 (처음 1, 두 번째 0)');
+      }],
+      ['일정: 추가·고치기·지우기, 구글 캘린더용 .ics 내보내기', async () => {
+        const e = expectStatus(await post(`${R}/events`, { date: today, title: '시험 일정', kind: '행사', time: '10:00' }), 200, '일정 추가').item;
+        await put(`${R}/events/${e.id}`, { ...e, title: '바뀐 일정' });
+        eq((await get(`${R}/admin`)).data.events.find((x) => x.id === e.id).title, '바뀐 일정', '고친 일정');
+        const ics = (await get(`${R}/events.ics`)).data;
+        has(ics, 'BEGIN:VCALENDAR', 'ics 머리');
+        has(ics, `${e.id}@church-allinone`, '일정 고유 번호');
+        await del(`${R}/events/${e.id}`);
+        ok(!(await get(`${R}/admin`)).data.events.some((x) => x.id === e.id), '지운 일정은 없어야 함');
+        expectStatus(await post(`${R}/events`, { title: '날짜 없음' }), 400, '날짜 없이 추가하면 거절');
+      }],
+      ['구글 캘린더: 구글 캘린더 주소가 아니면 받지 않는다', async () => {
+        for (const url of ['http://calendar.google.com/x.ics', 'https://evil.example/x.ics', 'https://calendar.google.com:8443/x.ics', 'https://calendar.google.com/x.txt']) {
+          expectStatus(await post(`${R}/gcals`, { url }), 400, `거절해야 할 주소 ${url}`);
+        }
+      }],
+      ['회의록: 쓰기·고치기, 새 회의 이름은 목록에 저절로 더해진다', async () => {
+        const m = expectStatus(await post(`${R}/minutes`, { date: today, meeting: '시험모임', title: '1차', content: '내용' }), 200, '회의록 쓰기').item;
+        ok((await get(`${R}/admin`)).data.meetingTypes.includes('시험모임'), '회의 이름 목록');
+        await put(`${R}/minutes/${m.id}`, { ...m, decisions: '결정 1' });
+        eq((await get(`${R}/admin`)).data.minutes.find((x) => x.id === m.id).decisions, '결정 1', '고친 결정 사항');
+        await post(`${R}/meeting-types`, { op: 'rename', name: '시험모임', to: '바뀐모임' });
+        eq((await get(`${R}/admin`)).data.minutes.find((x) => x.id === m.id).meeting, '바뀐모임', '회의 이름 바꾸면 회의록도');
+      }],
+      ['회의록(예제): 녹취와 AI 정리 예제가 채워진다', async () => {
+        const m = (await post(`${S}/minutes`, { date: today, meeting: '제직회', title: '예제 녹취' })).data.item;
+        await post(`${S}/minutes/${m.id}/transcribe`, { auto: true });
+        const done = await waitFor(async () => { const x = (await get(`${S}/admin`)).data.minutes.find((y) => y.id === m.id); return x?.transcript && x?.decisions ? x : null; }, 20000);
+        ok(done.transcript.length > 50 && done.decisions.length > 5, '녹취록과 결정 사항', { t: done.transcript.length, d: done.decisions });
+      }],
+      ['녹취 준비: 엔진·모델 상태를 알려 준다', async () => {
+        const st = expectStatus(await get(`${R}/stt`), 200, '녹취 상태');
+        const s = st.stt || st;
+        ok(s.models && Object.keys(s.models).length >= 2, '모델 목록', s);
+      }],
+      ['증명서: 번호가 연도-순번으로 매겨지고, 세례 기록 없이 세례증명서는 거절', async () => {
+        const c1 = expectStatus(await post(`${R}/certs`, { type: '교인증명서', memberId: ctx.kim }), 200, '교인증명서').cert;
+        const c2 = (await post(`${R}/certs`, { type: '세례증명서', memberId: ctx.kim })).data.cert;
+        eq([c1.no, c2.no], [`${today.slice(0, 4)}-001`, `${today.slice(0, 4)}-002`], '증명서 번호');
+        expectStatus(await post(`${R}/certs`, { type: '세례증명서', memberId: ctx.lee }), 400, '세례 기록 없는 분');
+      }],
+      ['봉사 배정표: 봉사 종류·배정 저장, 지운 봉사의 배정도 정리', async () => {
+        const roles = (await get(`${R}/admin`)).data.serve.roles;
+        eq(roles.map((r) => r.name).slice(0, 3), ['대표기도', '안내', '헌금위원'], '기본 봉사 종류');
+        await put(`${R}/serve/roles`, { roles: [{ ...roles[0], pool: [ctx.kim, 'nope'] }, roles[1]] });
+        eq((await get(`${R}/admin`)).data.serve.roles[0].pool, [ctx.kim], '맡는 분 (없는 번호는 뺌)');
+        await put(`${R}/serve/plan`, { dates: { [today]: { [roles[0].id]: [ctx.kim], [roles[1].id]: ['명부 밖 분'] } } });
+        eq((await get(`${R}/admin`)).data.serve.plan[today], { [roles[0].id]: [ctx.kim], [roles[1].id]: ['명부 밖 분'] }, '저장된 배정');
+        await put(`${R}/serve/roles`, { roles: [roles[0]] });
+        eq(Object.keys((await get(`${R}/admin`)).data.serve.plan[today]), [roles[0].id], '지운 봉사의 배정');
+      }],
+      ['성도 지우기: 지우면 출석에서 빠지고 봉사표에는 이름으로 남는다', async () => {
+        await put(`${R}/attendance/${today}`, { memberIds: [ctx.kim, ctx.lee] });
+        await del(`${R}/members/${ctx.kim}`);
+        const p = (await get(`${R}/people`)).data, a = (await get(`${R}/admin`)).data;
+        eq(p.attendance[today], [ctx.lee], '출석에서 빠짐');
+        ok(Object.values(a.serve.plan[today]).flat().includes('김시험'), '봉사표에는 이름 글자로', a.serve.plan[today]);
+      }],
+      ['프로그램 목록: 설치·켜짐 상태를 보여 준다 (가짜 프로그램)', async () => {
+        const apps = (await get('/api/apps')).data;
+        eq(apps.map((a) => [a.id, a.installed, a.running]), [['fake', true, true], ['gone', false, false]], '프로그램 상태');
+      }],
+      ['업데이트: 새 버전을 알리고, 받기 표 앞까지만 보여 주고, 미루면 하루 동안 조용 (가짜 GitHub)', async () => {
+        const v = (await get('/api/update?force=1')).data;
+        eq([v.available, v.latest?.version, v.installable], [true, '9.9.9', false], '새 버전 (자동 설치 묶음 없음)');
+        eq(v.latest.notes, '## 시험\n- 바뀐 것', '업데이트 내용');
+        eq((await post('/api/update/snooze', { version: '9.9.9' })).data.snoozed, true, '나중에');
+        eq((await put('/api/update/settings', { notify: false })).data.notify, false, '알림 끄기');
+        expectStatus(await post('/api/update/install', {}), 200, '설치 요청');
+        const j = await waitFor(async () => { const x = (await get('/api/update')).data.job; return x.phase === 'error' ? x : null; });
+        has(j.error, '자동 설치 묶음이 없습니다', '묶음 없는 릴리스는 설치하지 않음');
+      }],
+      ['자동 백업: 저장하면 backups 폴더에 오늘 백업이 생긴다', async () => {
+        const files = fs.readdirSync(path.join(hub.dataDir, 'backups'));
+        ok(files.some((f) => f.startsWith('real-')), 'real 백업 파일', files);
+      }],
+      ['예제: 처음 상태로 되돌리면 바꾼 것이 사라진다 (실제 자료는 그대로)', async () => {
+        expectStatus(await post(`${S}/reset`, {}), 200, '예제 되돌리기');
+        ok(!(await get(`${S}/admin`)).data.minutes.some((m) => m.title === '예제 녹취'), '예제에서 만든 회의록은 사라짐');
+        eq((await get(R)).data.church.name, '시험교회', '실제 자료 교회 이름');
+        expectStatus(await post(`${R}/reset`, {}), 400, '실제 자료는 되돌리기 거절');
+      }],
+    ]);
+  } finally {
+    await hub.stop(); await gh.close(); await fakeApp.close();
+    fs.rmSync(appDir, { recursive: true, force: true });
+  }
+}

@@ -1,0 +1,211 @@
+// 화면 점검: 헤드리스 크롬으로 시험 서버 화면을 열어 단추를 누르고, 나와야 할 것이 나오는지와 화면 오류(콘솔 에러)가 없는지 본다.
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { deflateRawSync } from 'node:zlib';
+import puppeteer from 'puppeteer-core';
+import { startHub, runChecks, eq, ok, has, fakeServer, json, tmpDir, sleep, HUB } from './lib.mjs';
+
+export function findChrome() {
+  const c = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', '/usr/bin/google-chrome', '/usr/bin/chromium'].filter(Boolean);
+  return c.find((p) => fs.existsSync(p)) || '';
+}
+
+// 시험용 워드 파일 (zip 안의 word/document.xml)
+function docx(text) {
+  const files = { '[Content_Types].xml': '<Types/>', 'word/document.xml': `<w:document><w:body>${text.split('\n').map((l) => `<w:p><w:r><w:t>${l}</w:t></w:r></w:p>`).join('')}</w:body></w:document>` };
+  const parts = [], central = []; let off = 0, n = 0;
+  for (const [name, t] of Object.entries(files)) {
+    const nm = Buffer.from(name), raw = Buffer.from(t), data = deflateRawSync(raw);
+    const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(8, 8); h.writeUInt32LE(data.length, 18); h.writeUInt32LE(raw.length, 22); h.writeUInt16LE(nm.length, 26);
+    const c = Buffer.alloc(46); c.writeUInt32LE(0x02014b50, 0); c.writeUInt16LE(8, 10); c.writeUInt32LE(data.length, 20); c.writeUInt32LE(raw.length, 24); c.writeUInt16LE(nm.length, 28); c.writeUInt32LE(off, 42);
+    parts.push(h, nm, data); central.push(c, nm); off += 30 + nm.length + data.length; n++;
+  }
+  const cd = Buffer.concat(central), e = Buffer.alloc(22);
+  e.writeUInt32LE(0x06054b50, 0); e.writeUInt16LE(n, 8); e.writeUInt16LE(n, 10); e.writeUInt32LE(cd.length, 12); e.writeUInt32LE(off, 16);
+  return Buffer.concat([...parts, cd, e]);
+}
+
+export async function runUi() {
+  const chrome = findChrome();
+  if (!chrome) return [{ name: '화면 점검: 크롬을 찾지 못함 (CHROME_PATH 로 알려 주세요)', ok: false, error: '크롬이 없어 화면 점검을 하지 못했습니다' }];
+  if (!fs.existsSync(path.join(HUB, 'dist', 'index.html'))) return [{ name: '화면 점검: 빌드된 화면(dist)이 없음', ok: false, error: 'npm run build 를 먼저 하세요' }];
+  const gh = await fakeServer({ '/latest': json({ tag_name: 'v9.9.9', name: 'v9.9.9', html_url: 'https://example.invalid/r', body: '## 시험 버전\n- 화면 점검용', assets: [] }) });
+  const hub = await startHub({ name: 'ui', env: { UPDATE_LATEST_URL: `${gh.base}/latest` } });
+  const files = tmpDir('ui-files');
+  const profile = tmpDir('ui-profile');   // 사용자의 크롬 프로필과 섞이지 않게
+  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`] });
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1280, height: 900 });
+  let errors = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('pageerror', (e) => errors.push(String(e.message || e)));
+  page.on('dialog', (d) => d.accept());
+  const U = (p) => `${hub.base}${p}`;
+  const go = async (p) => { await page.goto(U(p), { waitUntil: 'networkidle0' }); };
+  const waitText = (t, timeout = 10000) => page.waitForFunction((x) => document.body.innerText.includes(x), { timeout }, t).catch(() => { throw new Error(`화면에 "${t}" 이(가) 나오지 않았습니다`); });
+  const clickText = async (t, sel = 'button, a, label') => {
+    const okd = await page.evaluate((text, s) => {
+      const els = [...document.querySelectorAll(s)].filter((e) => e.offsetParent !== null);
+      const el = els.find((e) => e.innerText.trim() === text) || els.find((e) => e.innerText.trim().includes(text));
+      if (el) { el.click(); return true; } return false;
+    }, t, sel);
+    if (!okd) throw new Error(`"${t}" 단추를 찾지 못했습니다`);
+    await sleep(150);
+  };
+  const typeLabel = async (labelText, value) => {
+    const h = await page.evaluateHandle((t) => [...document.querySelectorAll('label')].find((l) => l.innerText.trim().startsWith(t))?.querySelector('input, textarea'), labelText);
+    const el = h.asElement(); if (!el) throw new Error(`"${labelText}" 칸을 찾지 못했습니다`);
+    await el.click({ clickCount: 3 }); await el.type(value);
+  };
+  const noErrors = (what) => { const e = errors; errors = []; if (e.length) throw new Error(`${what}: 화면 오류 ${e.length}건\n      ${e.slice(0, 3).join('\n      ')}`); };
+  const sampleWeek = async () => (await hub.get('/api/ws/sample')).data.weeks.find((w) => w.wc?.serviceId).id;
+
+  try {
+    return await runChecks('화면 점검 (헤드리스 크롬)', [
+      ['업데이트 안내 창: 새 버전이 있으면 저절로 뜨고, [나중에] 뒤에는 🔔 새 버전 단추만 남는다', async () => {
+        await go('/');
+        await waitText('새 버전이 있습니다');
+        await waitText('v9.9.9'); await waitText('화면 점검용');
+        await clickText('나중에');
+        await page.waitForFunction(() => !document.body.innerText.includes('새 버전이 있습니다'));
+        await waitText('🔔 새 버전');
+        await go('/'); await sleep(800);
+        ok(!(await page.evaluate(() => document.body.innerText.includes('새 버전이 있습니다'))), '미룬 뒤 다시 열어도 창이 뜨지 않아야 함');
+        await clickText('🔔 새 버전'); await waitText('새 버전이 있습니다'); await clickText('나중에');
+        noErrors('업데이트 창');
+      }],
+      ['처음 화면: 교회 이름을 넣고 시작하기를 누르면 이번 주 준비함이 열린다', async () => {
+        await go('/');
+        await waitText('시작하기');
+        await typeLabel('교회 이름', '화면시험교회');
+        await clickText('시작하기');
+        await waitText('이번 주 예배 만들기');
+        eq((await hub.get('/api/ws/real')).data.church.name, '화면시험교회', '저장된 교회 이름');
+        noErrors('처음 화면');
+      }],
+      ['이번 주 준비함: 예배 만들기 창으로 만들면 예배 화면과 탭 5개가 열린다', async () => {
+        await clickText('이번 주 예배 만들기');
+        await waitText('무엇을 가져올까요?').catch(() => {});
+        await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.includes('만들기'))?.click());
+        for (const t of ['예배 정보', '찬양 콘티', '자막', '결과물', '설교 후 자료']) await waitText(t);
+        ok(/\/week\//.test(page.url()), '예배 화면 주소', page.url());
+        errors = errors.filter((e) => !/Failed to load resource/.test(e));   // 예배송출이 꺼져 있어 생기는 연결 실패 안내는 정상
+        noErrors('예배 만들기');
+      }],
+      ['예배 정보: 설교 제목을 쓰면 잠시 뒤 "저장됨"이 되고 서버에 남는다', async () => {
+        await typeLabel('설교 제목', '화면 점검 설교');
+        await page.waitForFunction(() => /저장됨/.test(document.body.innerText), { timeout: 8000 });
+        const id = page.url().split('/week/')[1].split('/')[0];
+        eq((await hub.get(`/api/ws/real/weeks/${id}`)).data.week.sermonTitle, '화면 점검 설교', '서버에 저장된 제목');
+        errors = errors.filter((e) => !/Failed to load resource/.test(e));
+        noErrors('예배 정보');
+      }],
+      ['원고 파일 가져오기: 워드(.docx)를 넣으면 원고 칸에 글이 들어간다', async () => {
+        const f = path.join(files, '원고.docx');
+        fs.writeFileSync(f, docx('첫 문단 원고입니다\n둘째 문단 원고입니다'));
+        const input = await page.$('input[type=file][accept*=".docx"]');
+        ok(input, '원고 파일 넣는 칸');
+        await input.uploadFile(f);
+        await waitText('원고.docx');
+        const v = await page.evaluate(() => [...document.querySelectorAll('textarea')].map((t) => t.value).find((x) => x.includes('첫 문단')) || '');
+        eq(v, '첫 문단 원고입니다\n둘째 문단 원고입니다', '원고 칸의 글');
+        errors = errors.filter((e) => !/Failed to load resource/.test(e));
+        noErrors('원고 파일');
+      }],
+      ['예제 보기: 예제를 누르면 예제 배너와 예제 교회가 보인다', async () => {
+        await go('/');
+        await clickText('예제', '.ws-toggle button');
+        await waitText('예제 자료를 보고 있습니다');
+        await waitText('예제교회');
+        noErrors('예제 보기');
+      }],
+      ['설교 후 자료(예제): 남은 자료 한꺼번에 만들기 → 설교 점검을 뺀 8가지가 모두 만들어진다', async () => {
+        await go(`/week/${await sampleWeek()}/after?ws=sample`);
+        await waitText('성도와 나누기');
+        await clickText('한꺼번에 만들기');
+        await page.waitForFunction(() => /8\/9 만듦|9\/9 만듦/.test(document.body.innerText), { timeout: 40000 }).catch(() => { throw new Error('8가지(설교 점검 빼고)가 만들어지지 않았습니다'); });
+        await waitText('카드 보기');
+        noErrors('설교 후 자료');
+      }],
+      ['카드뉴스(예제): 카드 보기에서 카드 그림이 6장 이상 그려지고 그림으로 저장할 수 있다', async () => {
+        const p2 = await browser.newPage();
+        const errs = []; p2.on('pageerror', (e) => errs.push(String(e.message)));
+        await p2.goto(U(`/api/ws/sample/weeks/${await sampleWeek()}/after/cards/view`), { waitUntil: 'load' });
+        await p2.waitForFunction(() => document.querySelectorAll('canvas').length >= 6, { timeout: 8000 }).catch(() => {});
+        const r = await p2.evaluate(() => ({ n: document.querySelectorAll('canvas').length, png: document.querySelector('canvas')?.toDataURL('image/png').length || 0, btn: [...document.querySelectorAll('button')].filter((b) => b.innerText.includes('그림으로 저장')).length }));
+        await p2.close();
+        ok(r.n >= 6 && r.png > 5000 && r.btn === r.n, '카드 수·그림·저장 단추', r);
+        eq(errs, [], '카드 화면 오류');
+      }],
+      ['성도(예제): 성도 추가 창으로 넣으면 명부에 보이고, 이름을 누르면 기록 모아보기가 나온다', async () => {
+        await go('/people?ws=sample');
+        await clickText('성도 추가');
+        await typeLabel('이름', '화면시험성도');
+        await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.includes('저장'))?.click());
+        await waitText('화면시험성도');
+        await clickText('화면시험성도', 'td, b, span, a, button, div');
+        await waitText('기록 모아보기');
+        noErrors('성도');
+      }],
+      ['재정(예제): 수입을 입력해 장부에 넣으면 목록에 보인다', async () => {
+        await go('/finance?ws=sample');
+        await clickText('수입·지출 입력');
+        const name = await page.$('input.entry-name'), amt = await page.$('.entry-table input.num');
+        ok(name && amt, '입력 칸');
+        await name.type('화면시험헌금자'); await amt.type('12345');
+        await clickText('장부에 넣기');
+        await waitText('넣었습니다');
+        await waitText('화면시험헌금자');
+        noErrors('재정');
+      }],
+      ['행정(예제): 일정 추가 창으로 넣으면 달력에 보인다', async () => {
+        await go('/admin?ws=sample');
+        await clickText('일정 추가');
+        await typeLabel('일정 이름', '화면시험일정');
+        await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.includes('저장'))?.click());
+        await waitText('화면시험일정');
+        noErrors('행정 일정');
+      }],
+      ['봉사 배정표(예제): 다음 달 빈 칸 돌아가며 채우기 → 표가 채워진다', async () => {
+        await go('/admin/serve?ws=sample');
+        await page.click('button[aria-label="다음달"]'); await sleep(200);
+        await page.click('button[aria-label="다음달"]'); await sleep(200);
+        await clickText('빈 칸 돌아가며 채우기');
+        await waitText('주의 빈 칸을 돌아가며 채웠습니다');
+        const filled = await page.evaluate(() => [...document.querySelectorAll('.serve-cell')].filter((c) => c.innerText.trim() && c.innerText.trim() !== '＋').length);
+        ok(filled >= 4, '채워진 칸 수', filled);
+        noErrors('봉사 배정표');
+      }],
+      ['설정: 새 버전 알림 끄기를 누르면 저장된다', async () => {
+        await go('/settings');
+        await waitText('새 버전이 나오면 알려 주기');
+        await clickText('새 버전이 나오면 알려 주기', 'label');
+        await sleep(500);
+        eq((await hub.get('/api/update')).data.notify, false, '서버에 저장된 알림 설정');
+        noErrors('설정');
+      }],
+      ['모든 화면이 오류 없이 열린다 (위 메뉴 · 예배 탭 · 성도·재정·행정 탭)', async () => {
+        const wk = await sampleWeek();
+        const pages = [['/', '이번 주'], [`/week/${wk}/info`, '예배 정보'], [`/week/${wk}/setlist`, '콘티'], [`/week/${wk}/subs`, '자막'], [`/week/${wk}/outputs`, '준비 상태'], [`/week/${wk}/after`, '설교 후 자료'],
+          ['/people/list', '성도'], ['/people/visits', '심방'], ['/people/attendance', '출석'], ['/finance/ledger', '재정'], ['/finance/report', '보고서'], ['/finance/receipts', '영수증'], ['/finance/settings', '항목'],
+          ['/admin/calendar', '일정'], ['/admin/minutes', '회의록'], ['/admin/serve', '봉사'], ['/admin/certs', '증명서'], ['/songs', '찬양 자료'], ['/apps', '프로그램'], ['/settings', '설정'], ['/guide', '사용설명서']];
+        const bad = [];
+        for (const [p, t] of pages) {
+          await go(`${p}${p.includes('?') ? '&' : '?'}ws=sample`);
+          const text = await page.evaluate(() => document.body.innerText);
+          if (!text.includes(t)) bad.push(`${p}: "${t}" 없음`);
+          const e = errors.filter((x) => !/Failed to load resource: the server responded with a status of 404/.test(x) || !/favicon/.test(x)); errors = [];
+          if (e.length) bad.push(`${p}: 화면 오류 ${e[0]}`);
+        }
+        eq(bad, [], '문제가 있는 화면');
+      }],
+    ]);
+  } finally {
+    await browser.close().catch(() => {});
+    await hub.stop(); await gh.close();
+    fs.rmSync(files, { recursive: true, force: true });
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
+}

@@ -136,7 +136,8 @@ AI가 만든 웹페이지는 따로 떨어진 상자(sandbox)에서만 열어, �
 npm install && npm run build && npm start   # http://localhost:5191
 ```
 
-- 개발: `npm run dev` (서버 5191 + 화면 5192) · 시험: `npm test` · 형식 검사와 빌드: `npm run build`
+- 개발: `npm run dev` (서버 5191 + 화면 5192) · 형식 검사와 빌드: `npm run build`
+- **전체 점검: `npm run verify`** (형식 검사 · 빌드 · vitest · 서버 API · 헤드리스 크롬 화면 점검). 하나라도 실패하면 끝 코드 1이고, 배포 스크립트는 이 점검을 먼저 돌려 실패하면 배포 파일을 만들지 않습니다. 시험 서버는 임시 자료 폴더·다른 포트로 띄우므로 실제 자료와 켜져 있는 프로그램은 건드리지 않습니다. 작업 규칙은 [CLAUDE.md](CLAUDE.md)에 있습니다.
 - 맥에서는 `교회 올인원 열기.command`를 두 번 눌러도 됩니다.
 - 환경 변수: `PORT`(기본 5191), `HUB_DATA_DIR`(기본 `./data`), `WC_URL`(기본 `http://127.0.0.1:5300`), `PRAISEFLOW_URL`
 
@@ -149,7 +150,7 @@ npm install && npm run build && npm start   # http://localhost:5191
 | `apps.json` | 이어 주는 프로그램 목록(포트, 맥 실행 명령, 윈도우 `win` 설정) |
 | `docs/` | 소개 페이지(GitHub Pages). 화면 사진은 모두 예제 자료(`?ws=sample`)로 찍었습니다. |
 | `installer/` | 설치 묶음 만들기 |
-| `tests/` | vitest 시험 |
+| `tests/` | 전체 점검 `run.js`, vitest 시험(`*.test.ts`), 서버·화면 점검(`harness/`) |
 
 - 자료: `data/real.json`(우리 교회), `data/sample.json` + `data/sample-caster.json`(예제), 녹음 `data/recordings/`, 매일 백업 `data/backups/`(14일).
 - **예제 모드**는 실제 예배송출을 건드리지 않는 가상 예배송출을 씁니다. 예제 찬양 가사는 저작권 문제를 피하려고 직접 쓴 글입니다.
@@ -172,7 +173,7 @@ npm install && npm run build && npm start   # http://localhost:5191
   - 받는 주소는 이 저장소의 `releases/download/`로만 제한합니다. 확인값이 맞을 때만 자료를 백업하고, 자료 폴더 `app-update/버전`에 다 푼 뒤 `current.json`을 바꿉니다.
   - 켤 때 `server/index.mjs`(시작 파일, `server/boot.mjs`)가 앱보다 새 버전이 받아져 있으면 그 `main.mjs`를 켭니다. 켜지 못하면 치우고 앱에 든 버전으로 켭니다. 앱이 더 새것이면 받아 둔 것은 지웁니다.
   - 맥 `.app`이나 앱 폴더의 파일은 고치지 않습니다.
-- 배포 순서: `package.json` 버전 올리기 → `npm test`(가짜 배포 서버로 자동 설치까지 점검)·`npm run build` → 세 묶음 만들기(맥 묶음은 `ChurchAllInOne-mac.zip`으로 이름 바꿈) → 세 파일의 `SHA256SUMS.txt` → 릴리스에 네 파일 올리기.
+- 배포 순서: `package.json` 버전 올리기 → `npm run verify`(가짜 배포 서버로 자동 설치까지 점검) → 세 묶음 만들기(맥 묶음은 `ChurchAllInOne-mac.zip`으로 이름 바꿈) → 세 파일의 `SHA256SUMS.txt` → 릴리스에 네 파일 올리기.
 
 ### 앞으로
 

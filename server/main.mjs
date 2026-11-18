@@ -27,7 +27,9 @@ const DATA_DIR = process.env.HUB_DATA_DIR || (WIN ? path.join(process.env.APPDAT
 const BUNDLE_DIR = process.env.BUNDLE_DIR || path.resolve(ROOT, '..');
 const WC_URL = process.env.WC_URL || 'http://127.0.0.1:5300';
 const PRAISEFLOW_URL = process.env.PRAISEFLOW_URL || 'http://127.0.0.1:5173';
-const LOG_DIR = path.join(os.homedir(), '.raon-workspace');
+// 점검(하네스)에서는 기록 폴더와 프로그램 목록을 시험용으로 바꿔 실제 기록·프로그램을 건드리지 않는다
+const LOG_DIR = process.env.HUB_LOG_DIR || path.join(os.homedir(), '.raon-workspace');
+const APPS_FILE = process.env.HUB_APPS_FILE || path.join(ROOT, 'apps.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
 if (!WIN) process.env.PATH = `${os.homedir()}/.local/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
@@ -130,7 +132,7 @@ async function linkTemplate(sp, w, template = 'sunday') {
 // 윈도우에서는 각 프로그램의 "win" 설정을 쓰고, 그 설정이 없는 프로그램(맥 전용)은 보이지 않게 한다.
 // {bundle} = 윈도우 묶음 맨 위 폴더, %이름% = 윈도우 환경 변수
 const expand = (v) => String(v || '').replace(/^~(?=[\\/]|$)/, os.homedir()).replace(/\{bundle\}/g, BUNDLE_DIR).replace(/%(\w+)%/g, (m, k) => process.env[k] ?? m);
-const loadApps = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'apps.json'), 'utf8'))
+const loadApps = () => JSON.parse(fs.readFileSync(APPS_FILE, 'utf8'))
   .map((a) => (WIN ? (a.win ? { ...a, ...a.win } : null) : a)).filter(Boolean)
   .map((a) => ({
     ...a, dir: a.dir ? path.normalize(expand(a.dir)) : '', env: Object.fromEntries(Object.entries(a.env || {}).map(([k, v]) => [k, expand(v)])),

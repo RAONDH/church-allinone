@@ -7,6 +7,8 @@ HUB="$(cd "$(dirname "$0")/.." && pwd)"
 PF="${PRAISEFLOW_DIR:-$HOME/Documents/praiseflow---예배-찬양-큐레이터}"
 CASTER="${CASTER_APP:-$HOME/Applications/예배송출.app}"
 OUT="${1:-$HOME/Desktop}"
+# 배포 전 전체 점검(하네스): 하나라도 실패하면 배포 파일을 만들지 않는다 (같은 코드로 이미 통과했으면 건너뜀)
+node "$HUB/tests/run.js" --if-needed || { echo "✗ 점검이 실패해서 배포 파일을 만들지 않습니다. 위의 실패 내용을 고친 뒤 다시 실행하세요."; exit 1; }
 STAMP="$(date +%Y%m%d)"
 WORK="$(mktemp -d)/교회올인원-설치"
 mkdir -p "$WORK/apps"
