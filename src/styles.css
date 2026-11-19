@@ -452,3 +452,9 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .lock-screen form { justify-content: center; margin: 12px 0; }
 .lock-screen input { width: 12em; text-align: center; font-size: 1.2rem; letter-spacing: .3em; }
 .lock-btn { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 4px 12px; font-size: .9rem; white-space: nowrap; }
+
+/* music sheet 가져오기 */
+.ms-songs { margin: 8px 0; padding-left: 22px; }
+.ms-songs li { margin: 6px 0; }
+.ms-songs .pill { margin-left: 6px; }
+.save-warn { margin: 0; border-radius: 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

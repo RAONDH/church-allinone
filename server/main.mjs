@@ -7,6 +7,7 @@ import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { openStore, uid } from './store.mjs';
+import { parseShareLink, fetchSetlist, applySetlist } from './musicsheet.mjs';
 import { httpWc, memoryWc, findLinks, applyWeek, copyService, summarize, snapshot, fingerprint, diffSnapshots } from './wc.mjs';
 import { sampleWcSeed, sampleHubSeed, samplePeopleSeed, sampleFinanceSeed, sampleAdminSeed, sampleServeSeed } from './sample.mjs';
 import { aiStatus, generate, LABELS } from './ai.mjs';
@@ -101,7 +102,13 @@ function cleanWeek(b) {
   for (const [k, f] of Object.entries(WEEK_FIELDS)) if (b[k] !== undefined) { const v = f(b[k]); if (v !== undefined) out[k] = v; }
   return out;
 }
+// 화면으로 보낼 예배 기록 (music sheet 공유 비밀번호는 빼고)
+const pub = (w) => (w.musicSheet ? { ...w, musicSheet: { url: w.musicSheet.url, hasPin: !!w.musicSheet.pin } } : w);
 const getWeek = (sp, id) => { const w = sp.store.db.weeks[id]; if (!w) throw new HttpError(404, '예배 기록을 찾을 수 없습니다.'); return w; };
+
+// 함께 쓰는 '설교자 이름 자막'은 가장 최근(이번 주·다음 예배) 기록일 때만 바꾼다.
+// 지난 예배를 열어 보거나 고쳐도 지금 송출용 이름 자막이 지난 제목으로 바뀌지 않게.
+const isNewest = (sp, w) => !Object.values(sp.store.db.weeks).some((x) => x.id !== w.id && x.wc?.serviceId && x.date > w.date);
 
 async function wcTry(fn) {
   try { return { ok: true, ...(await fn()) }; }
@@ -113,7 +120,7 @@ async function weekStatus(sp, w) {
   if (!w.wc?.serviceId) return { linked: false, connected: null };
   try {
     // 예배송출이 꺼져 있을 때 저장한 본문·제목·광고가 있으면 지금 반영 (바뀐 게 없으면 아무것도 쓰지 않음)
-    if (w.wc.serviceId) await applyWeek(sp.wc(), w).catch((e) => { if (e.code === 'WC_OFFLINE') throw e; });
+    if (w.wc.serviceId) await applyWeek(sp.wc(), w, { shared: isNewest(sp, w) }).catch((e) => { if (e.code === 'WC_OFFLINE') throw e; });
     const state = await sp.wc().state();
     const summary = summarize(state, w.wc.serviceId);
     if (!summary) return { linked: true, connected: true, missing: true };
@@ -134,7 +141,7 @@ async function linkTemplate(sp, w, template = 'sunday') {
   const svc = await wc.createService({ name: w.name, date: w.date, template });
   const links = findLinks(await wc.state(), svc.id);
   w.wc = { serviceId: svc.id, links };
-  return applyWeek(wc, w);
+  return applyWeek(wc, w, { shared: isNewest(sp, w) });
 }
 
 // ── 프로그램 실행 (기존 '라온동행교회 작업실'의 방식을 그대로 가져옴) ─────
@@ -252,6 +259,10 @@ async function api(req, res, url) {
   const s = (re) => sub.match(re);
   let q;
 
+  // 저장 상태 (저장이 실패하면 화면 위에 알리고, [다시 저장]으로 바로 다시 시도)
+  if (sub === '/save-status' && req.method === 'GET') return send(res, 200, sp.store.status());
+  if (sub === '/save-status/retry' && req.method === 'POST') { await sp.store.save().catch(() => {}); return send(res, 200, sp.store.status()); }
+
   // ── 잠금 (실제 교회 자료의 성도·재정·행정) ──
   if (r[1] === 'real') {
     if (sub === '/lock' && req.method === 'GET') return send(res, 200, lock.view(db, req));
@@ -263,7 +274,7 @@ async function api(req, res, url) {
 
   if (sub === '/' && req.method === 'GET') {
     const wc = await wcTry(async () => { const st = await sp.wc().state(); return { services: st.services.map((x) => ({ id: x.id, name: x.name, date: x.date, count: x.itemIds.length })), currentServiceId: st.currentServiceId }; });
-    return send(res, 200, { church: db.church, weeks: Object.values(db.weeks), settings: { wcUrl: sp.wc().base }, wc, sample: r[1] === 'sample' });
+    return send(res, 200, { church: db.church, weeks: Object.values(db.weeks).map(pub), settings: { wcUrl: sp.wc().base }, wc, sample: r[1] === 'sample' });
   }
   if (sub === '/church' && req.method === 'PUT') {
     const b = await body(req);
@@ -301,24 +312,24 @@ async function api(req, res, url) {
         const { service, map } = await copyService(wc, from.wc.serviceId, { name: w.name, date: w.date });
         const L = from.wc.links || {};
         w.wc = { serviceId: service.id, links: { passage: map[L.passage] || null, title: map[L.title] || null, notice: map[L.notice] || null, prayer: map[L.prayer] || null } };
-        return applyWeek(wc, w);
+        return applyWeek(wc, w, { shared: isNewest(sp, w) });
       });
     } else if (b.wcMode === 'template' || (b.wcMode === 'copy' && !from?.wc?.serviceId)) {
       sync = await wcTry(() => linkTemplate(sp, w, 'sunday'));
     }
     await sp.store.save();
-    return send(res, 200, { week: w, sync });
+    return send(res, 200, { week: pub(w), sync });
   }
 
   if ((q = s(/^\/weeks\/([a-f0-9]+)$/))) {
     const w = getWeek(sp, q[1]);
-    if (req.method === 'GET') return send(res, 200, { week: w, status: await weekStatus(sp, w) });
+    if (req.method === 'GET') return send(res, 200, { week: pub(w), status: await weekStatus(sp, w) });
     if (req.method === 'PUT') {
       const b = await body(req);
       Object.assign(w, cleanWeek(b), { updatedAt: Date.now() });
       await sp.store.save();   // 라온 교회 올인원 저장은 예배송출 연결과 상관없이 먼저 끝낸다
-      const sync = await wcTry(() => applyWeek(sp.wc(), w));
-      return send(res, 200, { week: w, sync });
+      const sync = await wcTry(() => applyWeek(sp.wc(), w, { shared: isNewest(sp, w) }));
+      return send(res, 200, { week: pub(w), sync });
     }
     if (req.method === 'DELETE') {
       delete db.weeks[w.id];
@@ -339,18 +350,49 @@ async function api(req, res, url) {
         const state = await sp.wc().state();
         if (!state.services.some((x) => x.id === b.serviceId)) throw new Error('그 예배 순서를 예배송출에서 찾을 수 없습니다.');
         w.wc = { serviceId: b.serviceId, links: findLinks(state, b.serviceId) };
-        return applyWeek(sp.wc(), w);
+        return applyWeek(sp.wc(), w, { shared: isNewest(sp, w) });
       }
       return linkTemplate(sp, w, 'sunday');
     });
     await sp.store.save();
-    return send(res, 200, { week: w, sync });
+    return send(res, 200, { week: pub(w), sync });
   }
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/unlink$/)) && req.method === 'POST') {
     const w = getWeek(sp, q[1]);
     w.wc = null;
     await sp.store.save();
-    return send(res, 200, { week: w });
+    return send(res, 200, { week: pub(w) });
+  }
+  // 라온 music sheet 공유 링크로 콘티 가져오기 (한쪽으로만 읽음, 로그인 정보는 쓰지 않음)
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/musicsheet$/))) {
+    const w = getWeek(sp, q[1]);
+    const view = async () => {
+      const l = w.musicSheet;
+      if (!l?.token) return { link: null };
+      const link = { url: l.url, hasPin: !!l.pin };
+      try { return { link, setlist: await fetchSetlist(l.token, l.pin) }; } catch (e) { return { link, error: e.message, needPin: e.code === 401 }; }
+    };
+    if (req.method === 'GET') return send(res, 200, await view());
+    if (req.method === 'PUT') {
+      const b = await body(req);
+      const token = await wrapB(() => parseShareLink(b.url));
+      if (!token) delete w.musicSheet;
+      else {
+        const keepPin = w.musicSheet?.token === token ? w.musicSheet.pin : '';
+        w.musicSheet = { url: str(b.url, 300).trim(), token, pin: b.pin === undefined ? keepPin || '' : str(b.pin, 40).trim() };
+      }
+      w.updatedAt = Date.now();
+      await sp.store.save();
+      return send(res, 200, await view());
+    }
+  }
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/musicsheet\/apply$/)) && req.method === 'POST') {
+    const w = getWeek(sp, q[1]);
+    if (!w.wc?.serviceId) throw new HttpError(400, '먼저 예배송출 예배 순서와 연결해 주세요.');
+    if (!w.musicSheet?.token) throw new HttpError(400, '먼저 music sheet 공유 링크를 넣어 주세요.');
+    const sl = await wrapB(() => fetchSetlist(w.musicSheet.token, w.musicSheet.pin));
+    const r = await wrapB(() => applySetlist(sp.wc(), w.wc.serviceId, sl));
+    return send(res, 200, { ...r, status: await weekStatus(sp, w) });
   }
   // 콘티: 곡 넣기·빼기·순서·조성·곡 구성
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/setlist$/)) && req.method === 'POST') {
@@ -412,7 +454,7 @@ async function api(req, res, url) {
     (w.finalHistory ||= []).unshift({ at: w.final.at, snap });
     w.finalHistory = w.finalHistory.slice(0, 5);
     await sp.store.save();
-    return send(res, 200, { week: w, status: await weekStatus(sp, w) });
+    return send(res, 200, { week: pub(w), status: await weekStatus(sp, w) });
   }
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/restore$/)) && req.method === 'POST') {
     const w = getWeek(sp, q[1]);
@@ -429,7 +471,7 @@ async function api(req, res, url) {
     const snap = snapshot(await wc.state(), w.wc.serviceId);
     w.final = { ...w.final, snap, fp: fingerprint(snap) };
     await sp.store.save();
-    return send(res, 200, { week: w, status: await weekStatus(sp, w) });
+    return send(res, 200, { week: pub(w), status: await weekStatus(sp, w) });
   }
   // 예배송출에서 이 예배를 '지금 예배'로 열기
   if ((q = s(/^\/weeks\/([a-f0-9]+)\/open-caster$/)) && req.method === 'POST') {
@@ -448,7 +490,7 @@ async function api(req, res, url) {
     // 예배 순서: 예배송출에서 (꺼져 있으면 확정본에서)
     const st = await weekStatus(sp, w);
     const order = (st.summary?.items || w.final?.snap?.items || []).map((i) => ({ title: i.title, type: i.type }));
-    const format = url.searchParams.get('format') === 'mobile' ? 'mobile' : 'print';
+    const format = ['mobile', 'fold4'].includes(url.searchParams.get('format')) ? url.searchParams.get('format') : 'print';
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
     if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date}.html`)}`;
     res.writeHead(200, headers); const hide = r[1] === 'real' ? { people: !lock.isOpen(db, req, 'people'), admin: !lock.isOpen(db, req, 'admin') } : {};

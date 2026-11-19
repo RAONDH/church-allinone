@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import puppeteer from 'puppeteer-core';
-import { startHub, runChecks, eq, ok, has, fakeServer, json, tmpDir, sleep, HUB } from './lib.mjs';
+import { startHub, runChecks, eq, ok, has, fakeServer, fakeMusicSheet, json, tmpDir, sleep, HUB } from './lib.mjs';
 
 export function findChrome() {
   const c = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -32,7 +32,8 @@ export async function runUi() {
   if (!chrome) return [{ name: '화면 점검: 크롬을 찾지 못함 (CHROME_PATH 로 알려 주세요)', ok: false, error: '크롬이 없어 화면 점검을 하지 못했습니다' }];
   if (!fs.existsSync(path.join(HUB, 'dist', 'index.html'))) return [{ name: '화면 점검: 빌드된 화면(dist)이 없음', ok: false, error: 'npm run build 를 먼저 하세요' }];
   const gh = await fakeServer({ '/latest': json({ tag_name: 'v9.9.9', name: 'v9.9.9', html_url: 'https://example.invalid/r', body: '## 시험 버전\n- 화면 점검용', assets: [] }) });
-  const hub = await startHub({ name: 'ui', env: { UPDATE_LATEST_URL: `${gh.base}/latest` } });
+  const ms = await fakeMusicSheet();
+  const hub = await startHub({ name: 'ui', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, MUSICSHEET_ORIGIN: ms.base } });
   const files = tmpDir('ui-files');
   const profile = tmpDir('ui-profile');   // 사용자의 크롬 프로필과 섞이지 않게
   const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
@@ -258,6 +259,20 @@ export async function runUi() {
         eq(errs, [], '주보 화면 오류');
         noErrors('주보');
       }],
+      ['접는 4면 주보(예제): 결과물 탭 단추로 열면 A4 가로 앞뒤 2쪽으로 인쇄되고, 넘치는 면이 없다', async () => {
+        await go(`/week/${await sampleWeek()}/outputs?ws=sample`);
+        const href = await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.innerText.includes('접는 4면 주보 열기'))?.getAttribute('href'));
+        ok(href, '접는 4면 주보 단추');
+        const p2 = await browser.newPage();
+        const errs = []; p2.on('pageerror', (e) => errs.push(String(e.message)));
+        await p2.goto(U(href), { waitUntil: 'load' });
+        ok(!(await p2.evaluate(() => document.body.innerText.includes('잘립니다'))), '넘쳐 잘리는 면이 없어야 함');
+        const pdf = Buffer.from(await p2.pdf({ format: 'A4', landscape: true, preferCSSPageSize: true, printBackground: true }));
+        await p2.close();
+        eq((pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length, 2, 'A4 가로 인쇄 쪽수 (앞·뒤)');
+        eq(errs, [], '주보 화면 오류');
+        noErrors('접는 4면 주보');
+      }],
       ['잠금: 설정에서 켜고 🔒 잠그기를 누르면 성도·재정이 잠금 화면이 되고, 암호를 넣으면 열린다', async () => {
         await go('/settings?ws=real');
         await waitText('잠금 (성도·재정·행정)');
@@ -285,6 +300,19 @@ export async function runUi() {
         errors = errors.filter((e) => !/status of 4(23|03)/.test(e));   // 잠긴 자료를 부를 때 나오는 423·403 은 정상
         noErrors('잠금');
       }],
+      ['찬양 콘티(예제): music sheet 공유 링크를 넣고 가져오기 → 곡 목록이 보이고, 예배송출 자막에 넣기 → 이번 주 찬양에 들어간다', async () => {
+        await go(`/week/${await sampleWeek()}/setlist?ws=sample`);
+        await waitText('라온 music sheet에서 가져오기');
+        const input = await page.$('input[aria-label="music sheet 공유 링크"]');
+        await input.click({ clickCount: 3 }); await input.type(ms.link('opentoken1'));
+        await clickText('가져오기');
+        await waitText('화면시험 새 노래'); await waitText('Intro → V1 → C → V1 → C ×2');
+        await clickText('예배송출 자막에 넣기');
+        await waitText('예배송출 콘티에 2곡을 넣었습니다');
+        const list = await page.evaluate(() => document.querySelector('ol.setlist')?.innerText || '');
+        ok(list.indexOf('화면시험 새 노래') >= 0 && list.indexOf('화면시험 새 노래') < list.indexOf('은혜의 강'), '이번 주 찬양에 music sheet 순서대로', list.slice(0, 200));
+        noErrors('music sheet 가져오기');
+      }],
       ['모든 화면이 오류 없이 열린다 (위 메뉴 · 예배 탭 · 성도·재정·행정 탭)', async () => {
         const wk = await sampleWeek();
         const pages = [['/', '이번 주'], [`/week/${wk}/info`, '예배 정보'], [`/week/${wk}/setlist`, '콘티'], [`/week/${wk}/subs`, '자막'], [`/week/${wk}/outputs`, '준비 상태'], [`/week/${wk}/after`, '설교 후 자료'],
@@ -303,7 +331,7 @@ export async function runUi() {
     ]);
   } finally {
     await browser.close().catch(() => {});
-    await hub.stop(); await gh.close();
+    await hub.stop(); await gh.close(); await ms.close();
     fs.rmSync(files, { recursive: true, force: true });
     fs.rmSync(profile, { recursive: true, force: true });
   }

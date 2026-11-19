@@ -47,6 +47,7 @@ export default function App() {
           <button className="link" onClick={() => setWs('real')}>우리 교회 자료로 돌아가기</button>
         </div>
       )}
+      <SaveWarn base={base} />
       <header className="top">
         <NavLink to="/" className="brand">라온 교회 올인원{ov?.church ? <small>{ov.church.name}</small> : null}</NavLink>
         <nav>
@@ -272,6 +273,28 @@ function Support() {
         <button onClick={copy}>계좌번호 복사</button>
       </div>
       {copied && <p className="muted small">{copied}</p>}
+    </div>
+  );
+}
+
+// 자료 저장이 실패했을 때만 화면 위에 알림 (30초마다 확인, [다시 저장]으로 바로 다시 시도)
+interface SaveStatus { lastSavedAt: number; lastError: string; lastErrorAt: number }
+function SaveWarn({ base }: { base: string }) {
+  const [s, setS] = useState<SaveStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api<SaveStatus>(`${base}/save-status`).then((x) => alive && setS(x)).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [base]);
+  if (!s?.lastError) return null;
+  const at = (n: number) => new Date(n).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const retry = async () => { try { setS(await api<SaveStatus>(`${base}/save-status/retry`, { method: 'POST' })); } catch { /* 다음 확인 때 다시 */ } };
+  return (
+    <div className="alert err save-warn" role="alert">
+      <b>자료를 저장하지 못했습니다.</b> ({s.lastError}) {s.lastSavedAt ? `마지막으로 저장된 때: ${at(s.lastSavedAt)}.` : ''} 디스크 공간·USB·권한을 확인한 뒤 다시 저장해 주세요.
+      <button onClick={retry}>다시 저장</button>
     </div>
   );
 }

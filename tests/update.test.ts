@@ -136,7 +136,7 @@ describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
     const relBase = `http://127.0.0.1:${(rel.address() as net.AddressInfo).port}`;
     const port = await freePort();
     const H = `http://127.0.0.1:${port}`;
-    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/`, UPDATE_EXTRA_KEYS: pubB64 };
+    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/`, UPDATE_EXTRA_KEYS: pubB64, HUB_LOG_DIR: tmp('log') };   // 다시 켜기 기록도 시험 폴더에 (실제 기록 파일에 쓰지 않게)
     delete (env as any).HUB_APP_ROOT; delete (env as any).BUNDLE_DIR;
     const pids = new Set<number>();
     cleanup.push(() => { for (const p of pids) try { process.kill(p); } catch { /* 이미 끝남 */ } });

@@ -19,12 +19,13 @@ export default function BulletinCard({ week }: { week: Week }) {
       <p className="muted small">입력한 예배 정보·예배 순서·찬양·광고·봉사·다음 주 일정과 설교 후 자료의 <b>주보 요약</b>을 모아 주보를 만듭니다. AI를 쓰지 않습니다.</p>
       <div className="row wrap">
         <a className="btn primary-link" href={`${url}?format=print`} target="_blank" rel="noopener">인쇄용 주보 열기 (A4 가로 2단)</a>
+        <a className="btn" href={`${url}?format=fold4`} target="_blank" rel="noopener">접는 4면 주보 열기</a>
         <a className="btn" href={`${url}?format=mobile&download=1`}>휴대폰 주보 파일 받기</a>
         <a className="btn" href={`${url}?format=mobile`} target="_blank" rel="noopener">휴대폰 주보 미리 보기</a>
         <button onClick={() => setOpen(true)}>주보 고정 정보</button>
       </div>
       {empty && <p className="alert info small">처음이시면 <b>주보 고정 정보</b>에 교회 주소·예배 시간·헌금 계좌를 한 번 적어 두세요. 매주 주보 아래에 들어갑니다.</p>}
-      <p className="muted small">인쇄용은 열린 화면의 <b>인쇄</b> 단추(또는 ⌘/Ctrl+P)로 A4 가로로 인쇄해 반으로 접으면 됩니다. 휴대폰 주보 파일은 카카오톡으로 보내면 받은 분이 열어 볼 수 있습니다.</p>
+      <p className="muted small">인쇄용은 열린 화면의 <b>인쇄</b> 단추(또는 ⌘/Ctrl+P)로 A4 가로로 인쇄해 반으로 접으면 됩니다. <b>접는 4면</b>은 A4 한 장 앞뒤로 인쇄(양면 · 짧은 쪽으로 넘기기)해 접으면 표지 → 안쪽 2·3면 → 뒷면이 됩니다. 휴대폰 주보 파일은 카카오톡으로 보내면 받은 분이 열어 볼 수 있습니다.</p>
       {open && s && <SettingsDialog s={s} onClose={() => setOpen(false)} onSaved={(x) => { setS(x); setOpen(false); }} />}
     </div>
   );

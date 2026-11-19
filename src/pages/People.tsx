@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Member, People as PeopleData, Tx, Visit } from '../lib/types';
-import { absentees, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
+import { absentees, attendanceWeeks, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
 import { fmtDate, ymd } from '../lib/week';
 import { WeekEvents } from './Admin';
 import { WeekServe } from './ServeTab';
@@ -105,14 +105,14 @@ function MemberList({ data, reload }: { data: PeopleData; reload: () => Promise<
             <thead><tr><th>이름</th><th>직분</th><th>구역</th><th>전화</th><th>생일</th><th>최근 심방</th></tr></thead>
             <tbody>
               {list.map((m) => {
-                const b = nextBirthday(m.birth, today);
+                const b = nextBirthday(m.birth, today, m);
                 return (
                   <tr key={m.id} onClick={() => setEdit(m)} tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && setEdit(m)}>
                     <td><b>{m.name}</b>{m.status !== 'active' && <span className="pill info">{STATUS_LABEL[m.status]}</span>}{m.familyId && <span className="muted small"> · 가족 {familyOf(data.members, m).length + 1}</span>}</td>
                     <td>{m.role}</td>
                     <td>{m.group}</td>
                     <td>{m.phone}</td>
-                    <td>{m.birth ? <>{m.birth.slice(-5).replace('-', '/')}{m.lunar && <span className="muted small"> 음</span>}{b && b.days <= 7 && <span className="pill todo">{b.days === 0 ? '오늘' : `${b.days}일 뒤`}</span>}</> : ''}</td>
+                    <td>{m.birth ? <>{m.birth.slice(-5).replace('-', '/')}{m.lunar && <span className="muted small"> 음{m.lunarLeap ? '(윤)' : ''}</span>}{b && b.days <= 7 && <span className="pill todo">{b.days === 0 ? '오늘' : `${b.days}일 뒤`}</span>}</> : ''}</td>
                     <td className="muted">{last[m.id] ? fmtDate(last[m.id]) : ''}</td>
                   </tr>
                 );
@@ -168,7 +168,8 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
           <label>이름<input value={f.name} onChange={set('name')} autoFocus={!member} /></label>
           <label>성별<select value={f.gender} onChange={set('gender')}><option value="">-</option><option>남</option><option>여</option></select></label>
           <label>생일 {age !== null && <span className="muted small">(만 {age}세)</span>}<input value={f.birth} onChange={set('birth')} placeholder="1965-03-02 또는 03-02" /></label>
-          <label className="check"><input type="checkbox" checked={f.lunar} onChange={set('lunar')} />음력 생일</label>
+          <label className="check"><input type="checkbox" checked={f.lunar} onChange={set('lunar')} />음력 생일{f.lunar && <span className="muted small"> (해마다 양력 날짜로 바꿔 알려 드립니다)</span>}</label>
+          {f.lunar && <label className="check"><input type="checkbox" checked={!!f.lunarLeap} onChange={set('lunarLeap')} />윤달 생일</label>}
           <label>전화<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
           <label>직분<input value={f.role} onChange={set('role')} list="roles" placeholder="성도·집사·권사·장로" /></label>
           <label>구역·소그룹<input value={f.group} onChange={set('group')} list="groups" /></label>
@@ -422,7 +423,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
       <div className="col">
         <div className="card">
           <h3>3주 연속 결석</h3>
-          {Object.keys(data.attendance).length < 3 ? <p className="muted small">출석을 3주 이상 기록하면 알려 드립니다.</p>
+          {attendanceWeeks(data, today) < 3 ? <p className="muted small">출석을 3주 이상 기록하면 알려 드립니다.</p>
             : absent.length ? <p className="small">{absent.map((m) => m.name).join(', ')}</p> : <p className="muted small">없습니다.</p>}
         </div>
         <div className="card">
@@ -462,7 +463,7 @@ export function CareCard() {
       <div className="care-grid">
         <div>
           <div className="muted small">🎂 생일 (7일 안)</div>
-          {births.length ? births.map(({ m, b }) => <div key={m.id}><b>{m.name}</b> {b.days === 0 ? '오늘' : fmtDate(b.date)}{m.lunar ? ' (음력 기록)' : ''}{b.age ? ` · ${b.age}세` : ''}</div>) : <div className="muted small">없습니다</div>}
+          {births.length ? births.map(({ m, b }) => <div key={m.id}><b>{m.name}</b> {b.days === 0 ? '오늘' : fmtDate(b.date)}{m.lunar ? ` (음력 ${+m.birth.slice(-5, -3)}/${+m.birth.slice(-2)}${m.lunarLeap ? ' 윤달' : ''})` : ''}{b.age ? ` · ${b.age}세` : ''}</div>) : <div className="muted small">없습니다</div>}
         </div>
         <div>
           <div className="muted small">🏠 심방 예정</div>
@@ -473,7 +474,7 @@ export function CareCard() {
         <WeekServe members={data.members} />
         <div>
           <div className="muted small">📋 3주 연속 결석</div>
-          {absent.length ? <div>{absent.map((m) => m.name).join(', ')}</div> : <div className="muted small">{Object.keys(data.attendance).length < 3 ? '출석 기록 3주부터' : '없습니다'}</div>}
+          {absent.length ? <div>{absent.map((m) => m.name).join(', ')}</div> : <div className="muted small">{attendanceWeeks(data, today) < 3 ? '출석 기록 3주부터' : '없습니다'}</div>}
         </div>
       </div>
     </div>

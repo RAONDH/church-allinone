@@ -47,7 +47,7 @@ export interface AppInfo { id: string; name: string; desc: string; icon: string;
 
 export type MemberStatus = 'active' | 'inactive' | 'moved' | 'deceased';
 export interface Member {
-  id: string; name: string; gender: '' | '남' | '여'; birth: string; lunar: boolean; phone: string; address: string;
+  id: string; name: string; gender: '' | '남' | '여'; birth: string; lunar: boolean; lunarLeap?: boolean; phone: string; address: string;
   role: string; group: string; baptism: string; baptismDate?: string; baptismPlace?: string; baptismBy?: string; registeredAt: string; status: MemberStatus; familyId: string; relation: string; memo: string;
   createdAt: number; updatedAt: number;
 }

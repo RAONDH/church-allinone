@@ -28,6 +28,22 @@ describe('백업', () => {
     await s.save();                 // 이때 어제까지의 파일을 오늘 날짜로 백업
     expect(fs.readdirSync(path.join(d, 'backups'))).toEqual(['real-2026-11-19.json']);
   });
+  it('바깥 백업: 같은 날 그 뒤에 고친 내용도 잠시 뒤 그날 백업 파일에 반영하고, 현재 자료까지 백업됐는지 알려 준다', async () => {
+    const d = T(), ext = T();
+    const s = openStore(d, 'real'); s.db.church = { name: '아침' }; await s.save();
+    const b = makeBackups({ dataDir: d, store: s, againMs: 150 });
+    expect((await b.setDir(ext)).ok).toBe(true);
+    expect(b.view().upToDate).toBe(true);
+    const file = path.join(ext, '라온교회올인원-백업', fs.readdirSync(path.join(ext, '라온교회올인원-백업')).find((f) => f.endsWith('.json'))!);
+    await new Promise((r) => setTimeout(r, 20));
+    s.db.church = { name: '저녁에 고침' }; await s.save();
+    expect(b.view().upToDate).toBe(false);
+    expect((await b.external()).skipped).toBe('soon');            // 방금 백업했으니 조금 뒤에
+    await new Promise((r) => setTimeout(r, 400));
+    expect(JSON.parse(fs.readFileSync(file, 'utf8')).church.name).toBe('저녁에 고침');
+    expect(b.view().upToDate).toBe(true);
+    expect((await b.external()).skipped).toBe('uptodate');        // 바뀐 게 없으면 다시 복사하지 않음
+  });
   it('바깥 백업 폴더: 정하면 자료와 녹음을 복사하고, 폴더가 없어지면 멈추지 않고 알린다', async () => {
     const d = T(), ext = T();
     const s = openStore(d, 'real'); s.db.church = { name: '바깥' }; s.db.weeks = {}; await s.save();

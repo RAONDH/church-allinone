@@ -50,6 +50,17 @@ const results = await runChecks('윈도우 묶음 실행 시험', [
     ok(fs.readFileSync(path.join(appdata, 'ChurchAllInOne', 'real.json'), 'utf8').includes('윈도우시험교회'), '자료 파일에 저장됨');
     kill(h.pid);
   }],
+  ['윈도우 실행 파일: 옛 버전 서버가 켜져 있으면 끄고 새 버전으로 켠다 (새 폴더로 바꿨는데 옛 서버가 계속 돌던 문제)', async () => {
+    const root = path.join(tmp, '라온 교회 올인원');
+    // 버전을 알려 주지 않는 옛 서버를 5191 에 띄운다
+    const old = spawn(process.execPath, ['-e', "require('http').createServer((q,s)=>s.end(JSON.stringify({ok:true}))).listen(5191,'127.0.0.1')"], { stdio: 'ignore', detached: true });
+    old.unref();
+    ok(await waitPort('http://127.0.0.1:5191/api/health', 15000), '옛 서버가 켜져야 함');
+    spawn('cmd', ['/c', path.join(root, '라온 교회 올인원 실행.cmd')], { env: { ...process.env, APPDATA: path.join(tmp, 'appdata') }, stdio: 'ignore', detached: true }).unref();
+    let h = null; for (let i = 0; i < 60; i++) { h = await health(5191); if (h?.version) break; await sleep(1000); }
+    eq(h?.version, JSON.parse(fs.readFileSync(path.join(HUB, 'package.json'), 'utf8')).version, '새 버전으로 바뀌어야 함');
+    kill(h.pid); kill(old.pid);
+  }],
   ['HWP 변환기: start-hub.cmd 가 파이썬 부품을 받고 5050 에서 켜진다', async () => {
     const dir = path.join(tmp, 'hwp');
     fs.mkdirSync(dir, { recursive: true });

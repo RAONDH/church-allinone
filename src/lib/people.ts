@@ -2,6 +2,7 @@
 import type { Cert, Member, Minutes, People, Serve, Tx, Visit } from './types';
 import { serveOf } from './serve';
 import { addDays, ymd } from './week';
+import { lunarToSolar } from './lunar';
 
 export const STATUS_LABEL: Record<Member['status'], string> = { active: '재적', inactive: '쉬는 중', moved: '이명', deceased: '별세' };
 export const VISIT_KINDS = ['심방', '전화', '병원', '새가족', '상담', '기타'];
@@ -10,11 +11,22 @@ const isCurrent = (m: Member) => m.status === 'active' || m.status === 'inactive
 
 const daysBetween = (a: string, b: string) => Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000);
 
-/** 다가오는 생일 (birth: YYYY-MM-DD 또는 MM-DD). 2월 29일생은 평년엔 2월 28일. */
-export function nextBirthday(birth: string, today: string): { date: string; days: number; age: number | null } | null {
+/** 다가오는 생일 (birth: YYYY-MM-DD 또는 MM-DD). 2월 29일생은 평년엔 2월 28일.
+ *  음력 생일(lunar)은 그해 음력 날짜를 양력으로 바꿔 계산한다 (leap: 윤달생, 그해 윤달이 없으면 평달). */
+export function nextBirthday(birth: string, today: string, opt: { lunar?: boolean; lunarLeap?: boolean } = {}): { date: string; days: number; age: number | null; lunar?: boolean } | null {
   const m = birth.match(/^(?:(\d{4})-)?(\d{2})-(\d{2})$/);
   if (!m) return null;
   const y0 = +today.slice(0, 4);
+  if (opt.lunar) {
+    // 음력 설은 양력 1~2월이라, 지난해 음력 생일이 올해 양력 초에 올 수 있다
+    for (const y of [y0 - 1, y0, y0 + 1]) {
+      const date = lunarToSolar(y, +m[2], +m[3], !!opt.lunarLeap);
+      if (!date) continue;
+      const days = daysBetween(today, date);
+      if (days >= 0) return { date, days, age: m[1] ? y - +m[1] : null, lunar: true };
+    }
+    return null;
+  }
   for (const y of [y0, y0 + 1]) {
     let mo = +m[2], d = +m[3];
     if (mo === 2 && d === 29 && new Date(y, 1, 29).getMonth() !== 1) d = 28;
@@ -27,7 +39,7 @@ export function nextBirthday(birth: string, today: string): { date: string; days
 
 export function upcomingBirthdays(members: Member[], today: string, within = 7) {
   return members.filter(isCurrent)
-    .map((m) => ({ m, b: nextBirthday(m.birth, today) }))
+    .map((m) => ({ m, b: nextBirthday(m.birth, today, m) }))
     .filter((x): x is { m: Member; b: NonNullable<ReturnType<typeof nextBirthday>> } => !!x.b && x.b.days <= within)
     .sort((a, b) => a.b.days - b.b.days);
 }
@@ -45,10 +57,26 @@ export function lastVisitMap(visits: Visit[]) {
   return out;
 }
 
-/** 출석을 기록한 최근 n번의 예배에 모두 빠진 재적 성도 (그 기간에 등록한 분은 뺌). 기록이 n번이 안 되면 빈 목록. */
+// 그 날짜가 든 주의 주일 (일요일 시작)
+const weekOf = (d: string) => addDays(d, -new Date(d + 'T00:00:00').getDay());
+/** 출석을 기록한 주 묶음 (오늘까지, 주일 날짜 → 그 주에 기록한 날짜들), 오래된 주부터 */
+function recordedWeeks(p: People, today: string) {
+  const out = new Map<string, string[]>();
+  for (const d of Object.keys(p.attendance).filter((d) => d <= today).sort()) {
+    const w = weekOf(d);
+    out.set(w, [...(out.get(w) || []), d]);
+  }
+  return [...out.values()];
+}
+/** 출석을 기록한 서로 다른 주의 수 */
+export const attendanceWeeks = (p: People, today: string) => recordedWeeks(p, today).length;
+
+/** 출석을 기록한 최근 n주에 한 번도 오지 않은 재적 성도 (한 주에 여러 번 기록해도 한 주로 세고, 그 주 어느 예배든 왔으면 출석).
+ *  그 기간에 등록한 분은 뺌. 기록한 주가 n주가 안 되면 빈 목록. */
 export function absentees(p: People, today: string, n = 3) {
-  const dates = Object.keys(p.attendance).filter((d) => d <= today).sort().slice(-n);
-  if (dates.length < n) return [];
+  const weeks = recordedWeeks(p, today).slice(-n);
+  if (weeks.length < n) return [];
+  const dates = weeks.flat();
   const came = new Set(dates.flatMap((d) => p.attendance[d]));
   return p.members.filter((m) => m.status === 'active' && !came.has(m.id) && (!m.registeredAt || m.registeredAt <= dates[0]));
 }

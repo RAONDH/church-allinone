@@ -67,7 +67,10 @@ export function backupPlaces() {
   return out;
 }
 
-export function makeBackups({ dataDir, store, isBusy = () => '' }) {
+// 저장한 뒤 이만큼 지나면 바깥 백업을 그날 파일에 새로 덮어쓴다 (저장할 때마다 복사하지 않게 모아서)
+const AGAIN_MS = 10 * 60 * 1000;
+
+export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN_MS }) {
   const stFile = path.join(dataDir, 'backup.json');
   const load = () => { try { return JSON.parse(fs.readFileSync(stFile, 'utf8')); } catch { return {}; } };
   let st = { dir: '', lastAt: 0, lastError: '', lastFile: '', lastDay: '', ...load() };
@@ -90,11 +93,22 @@ export function makeBackups({ dataDir, store, isBusy = () => '' }) {
     return abs;
   }
 
-  /** 바깥 폴더로 복사 (force 가 아니면 하루 한 번) */
+  const changedAt = () => { try { return fs.statSync(realFile).mtimeMs; } catch { return 0; } };
+  let timer = null;
+  /** 바깥 폴더로 복사. 날짜마다 파일 하나(real-날짜.json)이고, 같은 날 자료가 또 바뀌면
+   *  마지막 백업에서 againMs 가 지난 뒤 그날 파일을 새 내용으로 덮어쓴다 (force 면 바로). */
   async function external(force = false) {
     if (!st.dir) return { skipped: 'off' };
     const day = localDay();
-    if (!force && st.lastDay === day && !st.lastError) return { skipped: 'today' };
+    if (!force && st.lastDay === day && !st.lastError) {
+      if (changedAt() <= st.lastAt) return { skipped: 'uptodate' };
+      const wait = st.lastAt + againMs - Date.now();
+      if (wait > 0) {
+        if (!timer) { timer = setTimeout(() => { timer = null; external().catch(() => {}); }, wait); timer.unref?.(); }
+        return { skipped: 'soon' };
+      }
+    }
+    if (timer) { clearTimeout(timer); timer = null; }
     try {
       if (!fs.existsSync(st.dir)) throw bad('바깥 백업 폴더가 연결되어 있지 않습니다 (USB가 빠져 있거나 클라우드 폴더가 없음). 연결되면 다음 저장 때 다시 백업합니다.');
       if (!fs.existsSync(realFile)) return { skipped: 'nodata' };
@@ -133,7 +147,7 @@ export function makeBackups({ dataDir, store, isBusy = () => '' }) {
   return {
     view() {
       const local = (() => { try { return fs.readdirSync(localDir).filter((f) => /^(real-\d{4}-\d{2}-\d{2}|before-restore-.+)\.json$/.test(f)).map((f) => { const s = fs.statSync(path.join(localDir, f)); return { file: f, size: s.size, at: s.mtimeMs }; }).sort((a, b) => b.at - a.at); } catch { return []; } })();
-      return { dir: st.dir, lastAt: st.lastAt, lastError: st.lastError, lastFile: st.lastFile, places: backupPlaces(), local, recordings: recFiles().length };
+      return { dir: st.dir, lastAt: st.lastAt, lastError: st.lastError, lastFile: st.lastFile, upToDate: !!st.lastAt && changedAt() <= st.lastAt, places: backupPlaces(), local, recordings: recFiles().length };
     },
     async setDir(dir) { st.dir = checkDir(dir); st.lastError = ''; st.lastDay = ''; persist(); return st.dir ? external(true) : { ok: true, off: true }; },
     external,

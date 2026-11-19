@@ -9,6 +9,7 @@ import AfterTab from './AfterTab';
 import { docText } from '../lib/docText';
 import { setBusy } from '../lib/busy';
 import BulletinCard from './Bulletin';
+import MusicSheetCard from './MusicSheetCard';
 
 const TABS = [['info', '예배 정보'], ['setlist', '찬양 콘티'], ['subs', '자막'], ['outputs', '결과물'], ['after', '설교 후 자료']] as const;
 const EDITABLE = ['date', 'name', 'passage', 'sermonTitle', 'announcements', 'sermonNotes', 'sermonVideoUrl', 'prayerLeader'] as const;
@@ -254,6 +255,7 @@ function SetlistTab({ week, status, setStatus, replaceWeek }: { week: Week; stat
           <label>인도자 메모 (콘티 전체)<textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} onBlur={() => note !== (status.summary!.note || '') && op({ op: 'note', note })} /></label>
           <p className="muted small">조성과 곡 구성(1절 → 후렴 …)은 예배송출에서 곡 자체에 저장됩니다. 다른 주에 같은 곡을 쓰면 함께 바뀌므로, 지난 예배는 ‘자막 확정’으로 보존해 두세요.</p>
         </div>
+        <MusicSheetCard week={week} songCount={inSet.length} setStatus={setStatus} onSongsChanged={loadSongs} />
         <RecommendCard week={week} songs={songs} inSet={ids} op={op} replaceWeek={replaceWeek} />
       </div>
       <div className="card">

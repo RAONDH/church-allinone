@@ -34,19 +34,31 @@ export function openStore(dataDir, ws, { onSaved } = {}) {
     const old = fs.readdirSync(path.join(dataDir, 'backups')).filter((f) => f.startsWith(ws + '-')).sort();
     for (const f of old.slice(0, Math.max(0, old.length - 14))) fs.rmSync(path.join(dataDir, 'backups', f));
   }
+  const st = { lastSavedAt: 0, lastError: '', lastErrorAt: 0 };
   function save() {
-    chain = chain.then(async () => {
-      backup();
-      const tmp = `${file}.tmp`;
-      await fs.promises.writeFile(tmp, JSON.stringify(db, null, 1));
-      await fs.promises.rename(tmp, file);
+    const run = chain.then(async () => {
+      try {
+        backup();
+        const tmp = `${file}.tmp`;
+        await fs.promises.writeFile(tmp, JSON.stringify(db, null, 1));
+        await fs.promises.rename(tmp, file);
+      } catch (e) {
+        Object.assign(st, { lastError: e.message, lastErrorAt: Date.now() });
+        console.error('자료 저장 실패:', e.message);
+        throw e;
+      }
+      Object.assign(st, { lastSavedAt: Date.now(), lastError: '' });
       if (onSaved) try { await onSaved(); } catch (e) { console.error('저장 뒤 백업:', e.message); }
     });
-    return chain;
+    // 이번 저장이 실패해도 다음 저장은 새로 시도한다 (실패가 줄 전체를 막지 않게)
+    chain = run.catch(() => {});
+    return run;
   }
   return {
     get db() { return db; },
     save,
+    /** 마지막으로 저장한 시각과 실패 내용 (화면 표시용) */
+    status: () => ({ ...st }),
     reset(next) { db = { ...empty(), ...next }; return save(); },
   };
 }

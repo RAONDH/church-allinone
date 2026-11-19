@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { fmtTime } from '../lib/week';
 
 interface BackupView {
-  dir: string; lastAt: number; lastError: string; lastFile: string; recordings: number;
+  dir: string; lastAt: number; lastError: string; lastFile: string; upToDate: boolean; recordings: number;
   places: { dir: string; label: string }[];
   local: { file: string; size: number; at: number }[];
 }
@@ -64,7 +64,7 @@ export default function BackupCard() {
       <h3>바깥 백업 폴더</h3>
       {v?.dir ? (
         <p className={v.lastError ? 'alert warn small' : 'small'}>
-          {v.lastError ? <>⚠️ {v.lastError}</> : <>✅ {v.lastAt ? `${fmtTime(v.lastAt)}에 백업했습니다` : '아직 백업 전'} · <code>{v.dir}</code></>}
+          {v.lastError ? <>⚠️ {v.lastError}</> : <>{v.upToDate ? '✅' : '🕘'} {v.lastAt ? `${fmtTime(v.lastAt)}에 백업했습니다` : '아직 백업 전'}{v.lastAt ? (v.upToDate ? ' · 현재 자료까지 백업됨' : ' · 그 뒤 고친 내용은 10분 안에 다시 백업합니다') : ''} · <code>{v.dir}</code></>}
         </p>
       ) : <p className="alert warn small">아직 바깥 백업 폴더가 없습니다. 컴퓨터가 고장 나면 백업도 함께 사라집니다.</p>}
       {v && v.places.length > 0 && (

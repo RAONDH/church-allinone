@@ -59,7 +59,7 @@ function Calendar({ data, members, visits, reload }: { data: AdminData; members:
   const weeks = monthGrid(month);
   const shift = (n: number) => { const d = new Date(+month.slice(0, 4), +month.slice(5, 7) - 1 + n, 1); setMonth(ymd(d).slice(0, 7)); };
   const name = (id: string) => members.find((m) => m.id === id)?.name || '';
-  const birthdaysOn = (d: string) => showCare ? members.filter((m) => (m.status === 'active' || m.status === 'inactive') && nextBirthday(m.birth, d)?.days === 0) : [];
+  const birthdaysOn = (d: string) => showCare ? members.filter((m) => (m.status === 'active' || m.status === 'inactive') && nextBirthday(m.birth, d, m)?.days === 0) : [];
   const visitsOn = (d: string) => showCare ? visits.filter((v) => v.planned && v.date === d) : [];
   const [gview, setGview] = useState<(ChurchEvent & { cal?: string }) | null>(null);
   const calOf = (id?: string) => data.gcals.find((g) => g.id === id);

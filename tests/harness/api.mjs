@@ -1,7 +1,7 @@
 // 서버·API 점검: 시험 서버에 실제로 요청을 보내 결과 값을 확인한다.
 import fs from 'node:fs';
 import path from 'node:path';
-import { startHub, runChecks, eq, ok, has, expectStatus, fakeServer, json, tmpDir, sleep } from './lib.mjs';
+import { startHub, runChecks, eq, ok, has, expectStatus, fakeServer, fakeMusicSheet, json, tmpDir, sleep } from './lib.mjs';
 
 const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
 const R = '/api/ws/real', S = '/api/ws/sample';
@@ -18,7 +18,8 @@ export async function runApi() {
     { id: 'fake', name: '가짜 프로그램', desc: '시험', icon: '🧪', color: '#000', port: fakeApp.port, dir: appDir, start: 'true', win: { dir: appDir, run: ['node', '-e', '0'] } },
     { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true', win: { dir: path.join(appDir, 'nope'), run: ['node', '-e', '0'] } },
   ]));
-  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile } });
+  const ms = await fakeMusicSheet();
+  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base } });
   const { get, post, put, del } = hub;
   const ctx = {};
   try {
@@ -37,6 +38,21 @@ export async function runApi() {
         await put(`${R}/church`, { name: '시험교회', pastor: '시험 목사', defaultServiceName: '주일 예배', theology: '웨슬리안' });
         const c = (await get(R)).data.church;
         eq([c.name, c.pastor, c.theology], ['시험교회', '시험 목사', '웨슬리안'], '저장된 교회 정보');
+      }],
+      ['자료 저장: 저장이 한 번 실패해도 원인이 없어지면 [다시 저장]으로 저장되고, 실패와 마지막 저장 시각을 알려 준다', async () => {
+        const s0 = expectStatus(await get(`${R}/save-status`), 200, '저장 상태');
+        ok(s0.lastSavedAt > 0 && s0.lastError === '', '교회 정보를 저장한 뒤라 저장 시각이 있고 오류가 없어야 함', s0);
+        const block = path.join(hub.dataDir, 'real.json.tmp');
+        fs.mkdirSync(block);   // 임시 파일 자리에 폴더를 두어 쓰기를 일부러 실패시킴
+        try {
+          ok((await put(`${R}/church`, { name: '시험교회', pastor: '시험 목사', defaultServiceName: '주일 예배' })).status >= 500, '저장 실패는 오류로 알려야 함');
+          const s1 = (await get(`${R}/save-status`)).data;
+          ok(s1.lastError, '실패 내용이 있어야 함', s1); eq(s1.lastSavedAt, s0.lastSavedAt, '마지막 저장 시각은 그대로');
+        } finally { fs.rmSync(block, { recursive: true, force: true }); }
+        const s2 = expectStatus(await post(`${R}/save-status/retry`), 200, '다시 저장');
+        eq(s2.lastError, '', '다시 저장한 뒤 오류');
+        ok(s2.lastSavedAt > s0.lastSavedAt, '저장 시각이 새로 바뀌어야 함', s2);
+        eq(JSON.parse(fs.readFileSync(path.join(hub.dataDir, 'real.json'), 'utf8')).church.name, '시험교회', '파일에 남은 교회 이름');
       }],
       ['이번 주 준비함: 예배를 만들면 목록에 보인다', async () => {
         const r = expectStatus(await post(`${R}/weeks`, { date: today, name: '주일 예배', wcMode: 'none' }), 200, '예배 만들기');
@@ -305,6 +321,20 @@ export async function runApi() {
         has(h2.headers.get('content-disposition'), 'attachment', '휴대폰 주보는 파일로 받기');
         has(h2.data, 'name="viewport"', '휴대폰 화면 맞춤');
       }],
+      ['접는 4면 주보: 바깥쪽에 4면·표지(1면), 안쪽에 2면(예배 순서·말씀)·3면(설교 요약·교회 소식)이 순서대로 들어간다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        await put(`${S}/bulletin`, { ...(await get(`${S}/bulletin`)).data, showServe: true, showOrder: true });   // 앞 점검이 꺼 둔 칸을 다시 켬
+        const html = expectStatus(await get(`${S}/weeks/${wk.id}/bulletin?format=fold4`), 200, '접는 4면 주보');
+        const outside = html.slice(html.indexOf('class="sheet outside"'), html.indexOf('class="sheet inside"'));
+        const inside = html.slice(html.indexOf('class="sheet inside"'));
+        ok(outside && inside, '바깥쪽·안쪽 두 쪽');
+        ok(outside.indexOf('섬기는 분들') >= 0 && outside.indexOf('섬기는 분들') < outside.indexOf('class="cover"'), '바깥쪽: 왼쪽 4면(봉사) → 오른쪽 1면(표지)');
+        has(outside, '예제교회', '표지에 교회 이름');
+        ok(inside.indexOf('예배 순서') >= 0 && inside.indexOf('예배 순서') < inside.indexOf('교회 소식'), '안쪽: 왼쪽 2면(예배 순서) → 오른쪽 3면(교회 소식)');
+        has(html, '짧은 쪽으로 넘기기', '양면 인쇄 안내');
+        const two = (await get(`${S}/weeks/${wk.id}/bulletin?format=print`)).data;
+        ok(!two.includes('sheet outside'), '2단 양식은 그대로 한 쪽');
+      }],
       ['주보: 적은 글에 태그가 있어도 실행되지 않고 글자로 나온다 (보안)', async () => {
         await put(`${R}/weeks/${ctx.week}`, { announcements: ['<script>alert(1)</script>', '<img src=x onerror=alert(1)>'] });
         const r = await get(`${R}/weeks/${ctx.week}/bulletin`);
@@ -388,6 +418,44 @@ export async function runApi() {
         eq((await fx('PUT', `${R}/lock`, { current: '9999', pin: '1111' })).status, 429, '기다리는 동안 설정 바꾸기');
         ok(fs.existsSync(path.join(hub.dataDir, 'lock-fails.json')), '틀린 기록이 파일에 남아 다시 켜도 이어짐');
       }],
+      ['music sheet 연동: 공유 링크만 받고, 비밀번호·팀원만 링크는 알맞게 안내하며, 가져온 곡을 예배송출 콘티에 순서·조성·곡 구성대로 넣는다', async () => {
+        const url = (w) => `${S}/weeks/${w}/musicsheet`;
+        expectStatus(await put(url(ctx.sw), { url: 'https://evil.example/share/opentoken1' }), 400, '다른 사이트 링크는 거절');
+        expectStatus(await put(url(ctx.sw), { url: `${ms.base}/setlists/abc` }), 400, '공유 링크가 아닌 주소는 거절');
+        has((await put(url(ctx.sw), { url: ms.link('lockedtok1') })).data.error, '팀원만', '팀원만 볼 수 있는 링크 안내');
+        let v = (await put(url(ctx.sw), { url: ms.link('pintoken12') })).data;
+        ok(v.needPin && /비밀번호가 필요/.test(v.error), '비밀번호가 필요하다고 안내', v);
+        has((await put(url(ctx.sw), { url: ms.link('pintoken12'), pin: '1111' })).data.error, '맞지 않습니다', '틀린 비밀번호 안내');
+        v = expectStatus(await put(url(ctx.sw), { url: ms.link('pintoken12'), pin: '2468' }), 200, '맞는 비밀번호');
+        eq(v.setlist?.songs.map((x) => x.title), ['화면시험 새 노래', '[예제] 은혜의 강'], '예배 순서대로 가져온 곡');
+        eq([v.setlist.songs[1].key, v.setlist.songs[1].flowText, v.setlist.songs[0].flowText], ['E', 'Intro → V1 → C → V1 → C ×2', 'Intro → V1 → C'], '조성·진행 (진행이 없으면 송폼 글자로)');
+        ok(v.link.hasPin && !JSON.stringify(v).includes('2468'), '비밀번호는 저장만 하고 돌려주지 않음', v.link);
+        eq((await get(url(ctx.sw))).data.setlist?.songs.length, 2, '다시 읽기 (저장된 비밀번호로)');
+        ok(!JSON.stringify((await get(`${S}/weeks/${ctx.sw}`)).data).includes('2468') && !JSON.stringify((await get(S)).data).includes('2468'), '예배 기록을 읽어도 비밀번호는 나오지 않음');
+        ok(ms.seen.pins.includes('2468'), '비밀번호를 x-share-pin 머리글로 보냄');
+        const r = expectStatus(await post(`${url(ctx.sw)}/apply`), 200, '예배송출 자막에 넣기');
+        const songs = r.status.summary.items.filter((i) => i.type === 'song');
+        eq(songs.map((x) => x.title), ['화면시험 새 노래', '[예제] 은혜의 강'], '예배송출 콘티의 곡 순서');
+        eq([songs[1].key, songs[1].arr], ['E', ['1절', '후렴', '1절', '후렴', '후렴']], '찾은 곡의 조성·곡 구성');
+        eq(songs[0].key, 'A', '새로 만든 곡의 조성');
+        has(r.results[0].done.join(' '), '새 곡', '새로 만든 곡 알림');
+        ok(r.removed.length > 0, '원래 있던 다른 곡은 콘티에서 빠졌다고 알림', r.removed);
+        expectStatus(await put(url(ctx.sw), { url: '' }), 200, '연결 끊기');
+        eq((await get(url(ctx.sw))).data.link, null, '끊은 뒤 링크');
+      }],
+      ['송출 자막 보호: 지난 예배를 열거나 고쳐도 함께 쓰는 설교자 이름 자막은 이번 주 제목 그대로 (그 예배 자막은 바뀜)', async () => {
+        const caster = () => JSON.parse(fs.readFileSync(path.join(hub.dataDir, 'sample-caster.json'), 'utf8'));
+        const old = expectStatus(await post(`${S}/weeks`, { date: '2020-01-05', name: '주일 예배', wcMode: 'template' }), 200, '지난 예배 만들기').week;
+        const now = expectStatus(await post(`${S}/weeks`, { date: '2099-01-04', name: '주일 예배', wcMode: 'template' }), 200, '이번 예배 만들기').week;
+        await put(`${S}/weeks/${now.id}`, { sermonTitle: '이번 주 제목' });
+        const sub = () => caster().props.find((p) => /설교/.test(p.text))?.sub;
+        eq(sub(), '이번 주 제목', '이번 예배 제목을 고치면 이름 자막에 들어감');
+        await put(`${S}/weeks/${old.id}`, { sermonTitle: '지난 제목' });
+        expectStatus(await get(`${S}/weeks/${old.id}`), 200, '지난 예배 열기');
+        eq(sub(), '이번 주 제목', '지난 예배를 고치고 열어도 이름 자막');
+        const titleId = (await get(`${S}/weeks/${old.id}`)).data.week.wc.links.title;
+        has(caster().items.find((i) => i.id === titleId).slides[0].text, '지난 제목', '지난 예배 자신의 설교 제목 자막');
+      }],
       ['예제: 처음 상태로 되돌리면 바꾼 것이 사라진다 (실제 자료는 그대로)', async () => {
         expectStatus(await post(`${S}/reset`, {}), 200, '예제 되돌리기');
         ok(!(await get(`${S}/admin`)).data.minutes.some((m) => m.title === '예제 녹취'), '예제에서 만든 회의록은 사라짐');
@@ -396,7 +464,7 @@ export async function runApi() {
       }],
     ]);
   } finally {
-    await hub.stop(); await gh.close(); await fakeApp.close();
+    await hub.stop(); await gh.close(); await fakeApp.close(); await ms.close();
     fs.rmSync(appDir, { recursive: true, force: true });
   }
 }

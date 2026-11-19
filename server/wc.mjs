@@ -113,7 +113,8 @@ export function findLinks(state, serviceId) {
   };
 }
 
-export async function applyWeek(wc, week) {
+/** shared: false 면 함께 쓰는 이름 자막은 그 예배가 예배송출에서 지금 고른 예배일 때만 바꾼다 */
+export async function applyWeek(wc, week, { shared = true } = {}) {
   const link = week.wc;
   if (!link?.serviceId) return { skipped: true };
   const state = await wc.state();
@@ -149,7 +150,7 @@ export async function applyWeek(wc, week) {
     }
   }
   // 이름 자막 중 '설교'가 들어간 것의 아랫줄을 설교 제목으로 (예: 설교 · 담임목사 / 오늘의 제목)
-  if (week.sermonTitle?.trim() && Array.isArray(state.props)) {
+  if (week.sermonTitle?.trim() && Array.isArray(state.props) && (shared || state.currentServiceId === svc.id)) {
     const props = state.props.map((p) => (/설교/.test(p.text) ? { ...p, sub: week.sermonTitle.trim() } : p));
     if (JSON.stringify(props) !== JSON.stringify(state.props)) { await wc.setProps(props); done.push('설교자 이름 자막'); }
   }

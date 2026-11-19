@@ -28,6 +28,7 @@ const FIELDS = {
   gender: (v) => oneOf(['남', '여', ''], String(v ?? '').trim().replace(/^(남자|남성|M)$/i, '남').replace(/^(여자|여성|F)$/i, '여')),
   birth: (v) => normDate(v, { monthDayOk: true }),
   lunar: (v) => v === true || /^(true|1|음|음력|y|o)$/i.test(String(v ?? '').trim()),
+  lunarLeap: (v) => v === true || /^(true|1|윤|윤달)$/i.test(String(v ?? '').trim()),
   phone: (v) => str(v, 30).trim(),
   address: (v) => str(v, 200).trim(),
   role: (v) => str(v, 20).trim(),

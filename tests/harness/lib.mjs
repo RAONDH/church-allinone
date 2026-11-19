@@ -106,3 +106,35 @@ export function expectStatus(r, code, what) {
   if (r.status !== code) throw new Error(`${what}\n      기대 상태: ${code}\n      실제 상태: ${r.status} ${show(r.data)}`);
   return r.data;
 }
+
+/** 가짜 라온 music sheet: 공유 링크 토큰마다 열린 콘티·비밀번호 콘티·팀원만 콘티를 흉내 낸다 (실제 사이트 대신) */
+export async function fakeMusicSheet() {
+  const seen = { pins: [] };
+  const setlist = {
+    name: '화면시험 주일 콘티', gigDate: '2026-11-22T00:00:00.000Z', serviceType: '주일 예배', status: 'confirmed',
+    // 예배 순서(items)의 곡 순서가 곡 목록 순서와 다르다: 새 곡 → 은혜의 강
+    items: [{ kind: 'song', title: '', songIndex: 1 }, { kind: 'text', title: '기도', songIndex: -1 }, { kind: 'song', title: '', songIndex: 0 }],
+    songs: [
+      { _id: 'a', title: '[예제] 은혜의 강', artist: '예제', key: 'E', bpm: 72, capo: 0, structure: '', notes: '후렴 반복은 조용히',
+        flow: [{ part: 'intro', n: 0, times: 1 }, { part: 'verse', n: 1, times: 1 }, { part: 'chorus', n: 0, times: 1 }, { part: 'verse', n: 1, times: 1 }, { part: 'chorus', n: 0, times: 2 }] },
+      { _id: 'b', title: '화면시험 새 노래', artist: '시험', key: 'A', bpm: 120, capo: 2, structure: 'I-V1-C', flow: [], notes: '' },
+    ],
+  };
+  const srv = await fakeServer({
+    '*': (req, res) => {
+      const m = req.url.match(/^\/api\/setlists\/public\/([^/?]+)$/);
+      res.setHeader('Content-Type', 'application/json');
+      const pin = req.headers['x-share-pin'] || '';
+      if (pin) seen.pins.push(pin);
+      if (!m) { res.statusCode = 404; return res.end('{"message":"없음"}'); }
+      if (m[1] === 'opentoken1') return res.end(JSON.stringify(setlist));
+      if (m[1] === 'pintoken12') {
+        if (pin !== '2468') { res.statusCode = 401; return res.end(JSON.stringify({ message: '이 콘티는 비밀번호가 필요합니다', needPin: true })); }
+        return res.end(JSON.stringify(setlist));
+      }
+      if (m[1] === 'lockedtok1') { res.statusCode = 401; return res.end(JSON.stringify({ message: '팀원만', needLogin: true })); }
+      res.statusCode = 404; return res.end('{"message":"유효하지 않은 링크입니다"}');
+    },
+  });
+  return { ...srv, seen, link: (t) => `${srv.base}/share/${t}` };
+}
