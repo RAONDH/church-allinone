@@ -460,6 +460,7 @@ export async function runApi() {
         eq([sv.locked, sv.auto, sv.text], [true, '', null], '잠긴 동안 봉사 칸');
         ok(!JSON.stringify(e).includes('잠금시험봉사자') && !JSON.stringify(e).includes('고친 봉사'), '잠긴 동안 편집 자료에 이름이 없어야 함');
         ok(!(await get(`${B}`)).data.includes('고친 봉사'), '잠긴 동안 주보에 고친 봉사 글도 빠짐');
+        ok(!JSON.stringify((await fx('GET', `${R}/weeks/${ctx.week}`)).data).includes('고친 봉사') && !JSON.stringify((await fx('GET', R)).data).includes('고친 봉사'), '잠긴 동안 예배 기록·목록에도 고친 봉사 글이 없어야 함');
         eq((await fx('PUT', `${B}/blocks`, { id: 'serve', text: '몰래' })).status, 423, '잠긴 동안 봉사 칸 고치기');
         eq((await fx('PUT', `${B}/blocks`, { id: 'births', text: '몰래' })).status, 423, '잠긴 동안 생일 칸 고치기');
         eq((await fx('PUT', `${B}/blocks`, { id: 'ann', text: '광고는 됨' })).status, 200, '잠긴 동안에도 광고 칸은 고칠 수 있음');

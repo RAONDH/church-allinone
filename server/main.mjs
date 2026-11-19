@@ -102,8 +102,13 @@ function cleanWeek(b) {
   for (const [k, f] of Object.entries(WEEK_FIELDS)) if (b[k] !== undefined) { const v = f(b[k]); if (v !== undefined) out[k] = v; }
   return out;
 }
-// 화면으로 보낼 예배 기록 (music sheet 공유 비밀번호는 빼고)
-const pub = (w) => (w.musicSheet ? { ...w, musicSheet: { url: w.musicSheet.url, hasPin: !!w.musicSheet.pin } } : w);
+// 화면으로 보낼 예배 기록: music sheet 공유 비밀번호와 이번 주 주보 고침은 뺀다
+// (주보 고침에는 봉사자 이름 같은 잠금 대상이 들어갈 수 있어, 잠금을 따지는 /bulletin/blocks 로만 준다)
+const pub = (w) => {
+  if (!w.musicSheet && !w.bulletin) return w;
+  const { bulletin, ...rest } = w;
+  return rest.musicSheet ? { ...rest, musicSheet: { url: rest.musicSheet.url, hasPin: !!rest.musicSheet.pin } } : rest;
+};
 const getWeek = (sp, id) => { const w = sp.store.db.weeks[id]; if (!w) throw new HttpError(404, '예배 기록을 찾을 수 없습니다.'); return w; };
 
 // 함께 쓰는 '설교자 이름 자막'은 가장 최근(이번 주·다음 예배) 기록일 때만 바꾼다.
