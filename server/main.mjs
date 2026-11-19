@@ -19,7 +19,7 @@ import { makeUpdater } from './update.mjs';
 import { bootingFile } from './boot.mjs';
 import { makeBackups } from './backup.mjs';
 import { makeLock, areaOf } from './lock.mjs';
-import { bulletinData, bulletinHtml, cleanBulletinSettings, BULLETIN_DEFAULTS } from './bulletin.mjs';
+import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS } from './bulletin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -482,18 +482,47 @@ async function api(req, res, url) {
   }
 
   // 주보: 고정 정보(주소·예배 시간·계좌·표어)와 보일 칸 고르기, 인쇄용·휴대폰 주보 만들기
-  if (sub === '/bulletin' && req.method === 'GET') return send(res, 200, { ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) });
+  if (sub === '/bulletin' && req.method === 'GET') return send(res, 200, cleanBulletinSettings({ ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) }));
   if (sub === '/bulletin' && req.method === 'PUT' && r[1] === 'real') await wrapB(() => lock.guardAny(db, req));   // 잠금 중에는 주보 칸(생일 등)을 켜지 못하게
   if (sub === '/bulletin' && req.method === 'PUT') { db.bulletin = cleanBulletinSettings(await body(req)); await sp.store.save(); return send(res, 200, db.bulletin); }
-  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
-    const w = getWeek(sp, q[1]);
+  // 주보 편집 창: 칸마다 자동 내용과 이번 주에 고친 글
+  const bulletinHide = () => (r[1] === 'real' ? { people: !lock.isOpen(db, req, 'people'), admin: !lock.isOpen(db, req, 'admin') } : {});
+  const bulletinOrder = async (w) => {
     // 예배 순서: 예배송출에서 (꺼져 있으면 확정본에서)
     const st = await weekStatus(sp, w);
-    const order = (st.summary?.items || w.final?.snap?.items || []).map((i) => ({ title: i.title, type: i.type }));
+    return (st.summary?.items || w.final?.snap?.items || []).map((i) => ({ title: i.title, type: i.type }));
+  };
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin\/blocks$/))) {
+    const w = getWeek(sp, q[1]);
+    if (req.method === 'PUT') {
+      const b = await body(req);
+      const v = cleanWeekBlock(b);
+      if (!v) throw new HttpError(400, '없는 주보 칸입니다.');
+      // 성도·행정 정보가 든 칸은 잠금을 풀어야 고칠 수 있다
+      if (r[1] === 'real' && PRIVATE_BLOCKS[b.id]) for (const a of PRIVATE_BLOCKS[b.id]) await wrapB(() => lock.guard(db, req, a));
+      const blocks = ((w.bulletin ||= {}).blocks ||= {});
+      if (Object.keys(v).length) blocks[b.id] = v; else delete blocks[b.id];
+      w.updatedAt = Date.now();
+      await sp.store.save();
+    } else if (req.method !== 'GET') throw new HttpError(405, '지원하지 않는 요청입니다.');
+    const hide = bulletinHide();
+    const d = bulletinData({ db, week: w, order: await bulletinOrder(w), hide });
+    return send(res, 200, {
+      settings: d.s,
+      blocks: BLOCKS.map(([id, title]) => {
+        const locked = (PRIVATE_BLOCKS[id] || []).some((a) => hide[a]);
+        const o = locked ? {} : w.bulletin?.blocks?.[id] || {};
+        return { id, title, locked, auto: locked ? '' : blockText(d, id), text: typeof o.text === 'string' ? o.text : null, size: o.size === 's' ? 's' : 'n' };
+      }),
+    });
+  }
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
+    const w = getWeek(sp, q[1]);
+    const order = await bulletinOrder(w);
     const format = ['mobile', 'fold4'].includes(url.searchParams.get('format')) ? url.searchParams.get('format') : 'print';
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
     if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date}.html`)}`;
-    res.writeHead(200, headers); const hide = r[1] === 'real' ? { people: !lock.isOpen(db, req, 'people'), admin: !lock.isOpen(db, req, 'admin') } : {};
+    res.writeHead(200, headers); const hide = bulletinHide();
     res.end(bulletinHtml(bulletinData({ db, week: w, order, hide }), format)); return;
   }
 

@@ -3,12 +3,14 @@ import { useEffect, useState } from 'react';
 import { useApp } from '../App';
 import { api } from '../lib/api';
 import type { Week } from '../lib/types';
+import BulletinEditor from './BulletinEditor';
 
 interface BulletinSettings { address: string; phone: string; worshipTimes: string; account: string; motto: string; mottoVerse: string; showOrder: boolean; showSummary: boolean; showServe: boolean; showEvents: boolean; showBirthdays: boolean }
 
 export default function BulletinCard({ week }: { week: Week }) {
   const { base } = useApp();
   const [open, setOpen] = useState(false);
+  const [editor, setEditor] = useState(false);
   const [s, setS] = useState<BulletinSettings | null>(null);
   useEffect(() => { api<BulletinSettings>(`${base}/bulletin`).then(setS).catch(() => {}); }, [base, open]);
   const url = `${base}/weeks/${week.id}/bulletin`;
@@ -22,10 +24,12 @@ export default function BulletinCard({ week }: { week: Week }) {
         <a className="btn" href={`${url}?format=fold4`} target="_blank" rel="noopener">접는 4면 주보 열기</a>
         <a className="btn" href={`${url}?format=mobile&download=1`}>휴대폰 주보 파일 받기</a>
         <a className="btn" href={`${url}?format=mobile`} target="_blank" rel="noopener">휴대폰 주보 미리 보기</a>
+        <button className="primary" onClick={() => setEditor(true)}>주보 편집 (배치·글 고치기)</button>
         <button onClick={() => setOpen(true)}>주보 고정 정보</button>
       </div>
       {empty && <p className="alert info small">처음이시면 <b>주보 고정 정보</b>에 교회 주소·예배 시간·헌금 계좌를 한 번 적어 두세요. 매주 주보 아래에 들어갑니다.</p>}
-      <p className="muted small">인쇄용은 열린 화면의 <b>인쇄</b> 단추(또는 ⌘/Ctrl+P)로 A4 가로로 인쇄해 반으로 접으면 됩니다. <b>접는 4면</b>은 A4 한 장 앞뒤로 인쇄(양면 · 짧은 쪽으로 넘기기)해 접으면 표지 → 안쪽 2·3면 → 뒷면이 됩니다. 휴대폰 주보 파일은 카카오톡으로 보내면 받은 분이 열어 볼 수 있습니다.</p>
+      <p className="muted small">인쇄용은 열린 화면의 <b>인쇄</b> 단추(또는 ⌘/Ctrl+P)로 A4 가로로 인쇄해 반으로 접으면 됩니다. 칸 순서·자리를 바꾸거나 이번 주 글을 손보려면 <b>주보 편집</b>을 누르세요. <b>접는 4면</b>은 A4 한 장 앞뒤로 인쇄(양면 · 짧은 쪽으로 넘기기)해 접으면 표지 → 안쪽 2·3면 → 뒷면이 됩니다. 휴대폰 주보 파일은 카카오톡으로 보내면 받은 분이 열어 볼 수 있습니다.</p>
+      {editor && <BulletinEditor week={week} onClose={() => { setEditor(false); api<BulletinSettings>(`${base}/bulletin`).then(setS).catch(() => {}); }} />}
       {open && s && <SettingsDialog s={s} onClose={() => setOpen(false)} onSaved={(x) => { setS(x); setOpen(false); }} />}
     </div>
   );

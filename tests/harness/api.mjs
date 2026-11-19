@@ -342,6 +342,49 @@ export async function runApi() {
         has(r.data, '&lt;script&gt;alert(1)&lt;/script&gt;', '글자로 바뀐 태그');
         has(r.headers.get('content-security-policy'), "default-src 'none'", '주보 보안 머리글');
       }],
+      ['주보 편집: 칸 순서·자리(2단·4면)·켜기/끄기는 배치로 남고, 이번 주 글 고치기·작게·되돌리기는 그 주에만 (원래 자료는 그대로)', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        let e = expectStatus(await get(`${B}/blocks`), 200, '편집 창 자료');
+        eq(e.blocks.map((b) => b.id), ['order', 'sermon', 'summary', 'ann', 'serve', 'events', 'births', 'info'], '주보 칸');
+        eq(e.blocks.find((b) => b.id === 'ann').auto, (wk.announcements || []).join('\n'), '교회 소식 자동 내용 = 이번 주 광고');
+        eq(e.settings.layout.map((x) => `${x.id}:${x.col}${x.face}`).join(' '), 'order:L2 sermon:L2 summary:L3 ann:R3 serve:R4 events:R4 births:R4 info:R4', '처음 배치는 지금까지의 주보 모양');
+        const pos = (h, a, b) => h.indexOf(a) >= 0 && h.indexOf(b) >= 0 && h.indexOf(a) < h.indexOf(b);
+        const faceOf = (h, t) => { const i = h.indexOf(`<h3>${t}</h3>`); const m = [...h.slice(0, i).matchAll(/<p class="fno">(\d)<\/p>/g)].pop(); return i < 0 ? null : m?.[1]; };
+        // 교회 소식을 맨 앞·왼쪽·2면으로, 설교 요약 끄기
+        const layout = e.settings.layout.map((x) => (x.id === 'ann' ? { ...x, col: 'L', face: 2 } : x.id === 'summary' ? { ...x, on: false } : x));
+        layout.unshift(...layout.splice(layout.findIndex((x) => x.id === 'ann'), 1));
+        expectStatus(await put(`${S}/bulletin`, { ...e.settings, layout, showSummary: false }), 200, '배치 저장');
+        let h = (await get(`${B}?format=print`)).data;
+        ok(pos(h, '<h3>교회 소식</h3>', '<h3>예배 순서</h3>'), '2단: 교회 소식이 예배 순서보다 앞', h.slice(0, 0));
+        ok(!h.includes('<h3>설교 요약</h3>'), '끈 칸은 빠짐');
+        eq(faceOf((await get(`${B}?format=fold4`)).data, '교회 소식'), '2', '4면: 교회 소식이 2면에');
+        eq((await get(`${S}/bulletin`)).data.layout[0].id, 'ann', '배치는 다시 열어도 그대로');
+        // 이번 주 글 고치기
+        e = expectStatus(await put(`${B}/blocks`, { id: 'ann', text: '고친 광고 하나\n고친 광고 둘', size: 's' }), 200, '이번 주 글 저장');
+        eq(e.blocks.find((b) => b.id === 'ann').text, '고친 광고 하나\n고친 광고 둘', '저장된 이번 주 글');
+        h = (await get(`${B}?format=print`)).data;
+        ok(h.includes('<li>고친 광고 하나</li><li>고친 광고 둘</li>') && h.includes('<section class="sm"><h3>교회 소식</h3>'), '주보에 고친 글이 한 줄씩, 작은 글자로', h.slice(h.indexOf('교회 소식') - 30, h.indexOf('교회 소식') + 120));
+        for (const a of wk.announcements || []) ok(!h.includes(a) || ['고친 광고 하나', '고친 광고 둘'].includes(a), '원래 광고는 이번 주 주보에서 빠짐', a);
+        eq((await get(`${S}/weeks/${wk.id}`)).data.week.announcements, wk.announcements, '원래 광고 자료는 그대로');
+        await put(`${B}/blocks`, { id: 'order', text: '<b>태그</b>' });
+        h = (await get(`${B}?format=print`)).data;
+        ok(h.includes('&lt;b&gt;태그&lt;/b&gt;') && !h.includes('<b>태그'), '고친 글의 태그는 글자로 (보안)');
+        await put(`${B}/blocks`, { id: 'order', text: '' });
+        ok(!(await get(`${B}?format=print`)).data.includes('<h3>예배 순서</h3>'), '비워 두면 이번 주에는 그 칸을 넣지 않음');
+        // 되돌리기
+        await put(`${B}/blocks`, { id: 'order', text: null });
+        e = expectStatus(await put(`${B}/blocks`, { id: 'ann', text: null }), 200, '자동 내용으로 되돌리기');
+        eq([e.blocks.find((b) => b.id === 'ann').text, e.blocks.find((b) => b.id === 'ann').size], [null, 'n'], '되돌린 뒤 교회 소식');
+        h = (await get(`${B}?format=print`)).data;
+        ok(!h.includes('고친 광고 하나') && h.includes('<h3>예배 순서</h3>'), '되돌리면 자동 내용으로');
+        expectStatus(await put(`${B}/blocks`, { id: 'nope', text: 'x' }), 400, '없는 칸');
+        // 다른 예배에는 고친 글이 없다
+        const other = (await get(S)).data.weeks.find((w) => w.id !== wk.id);
+        if (other) eq((await get(`${S}/weeks/${other.id}/bulletin/blocks`)).data.blocks.filter((b) => b.text !== null).length, 0, '다른 예배의 고친 칸');
+        await put(`${S}/bulletin`, { ...e.settings, layout: null, showSummary: true });   // 다음 점검을 위해 처음 배치로
+        eq((await get(`${S}/bulletin`)).data.layout.map((x) => x.id)[0], 'order', '처음 배치로 되돌림');
+      }],
       ['프로그램 목록: 설치·켜짐 상태를 보여 준다 (가짜 프로그램)', async () => {
         const apps = (await get('/api/apps')).data;
         eq(apps.map((a) => [a.id, a.installed, a.running]), [['fake', true, true], ['gone', false, false]], '프로그램 상태');
@@ -407,6 +450,21 @@ export async function runApi() {
         const open = await fetch(`${hub.base}${R}/weeks/${ctx.week}/bulletin`, { headers: { Cookie: on.cookie } }).then((x) => x.text());
         has(open, '잠금시험봉사자', '잠금을 푼 쪽지로는 봉사자 이름이 보임');
         eq((await fx('PUT', `${R}/bulletin`, { showBirthdays: true })).status, 423, '잠긴 동안 주보 칸 바꾸기');
+      }],
+      ['잠금 중 주보 편집: 봉사·일정·생일 칸은 자동 내용도 고친 글도 보이지 않고 고칠 수 없다 (광고는 고칠 수 있음)', async () => {
+        const { fx } = ctx;
+        const B = `${R}/weeks/${ctx.week}/bulletin`;
+        eq((await fx('PUT', `${B}/blocks`, { id: 'serve', text: '고친 봉사' }, ctx.lockCookie)).status, 200, '잠금을 푼 쪽지로 봉사 칸 고치기');
+        const e = (await fx('GET', `${B}/blocks`)).data;
+        const sv = e.blocks.find((b) => b.id === 'serve');
+        eq([sv.locked, sv.auto, sv.text], [true, '', null], '잠긴 동안 봉사 칸');
+        ok(!JSON.stringify(e).includes('잠금시험봉사자') && !JSON.stringify(e).includes('고친 봉사'), '잠긴 동안 편집 자료에 이름이 없어야 함');
+        ok(!(await get(`${B}`)).data.includes('고친 봉사'), '잠긴 동안 주보에 고친 봉사 글도 빠짐');
+        eq((await fx('PUT', `${B}/blocks`, { id: 'serve', text: '몰래' })).status, 423, '잠긴 동안 봉사 칸 고치기');
+        eq((await fx('PUT', `${B}/blocks`, { id: 'births', text: '몰래' })).status, 423, '잠긴 동안 생일 칸 고치기');
+        eq((await fx('PUT', `${B}/blocks`, { id: 'ann', text: '광고는 됨' })).status, 200, '잠긴 동안에도 광고 칸은 고칠 수 있음');
+        await fx('PUT', `${B}/blocks`, { id: 'ann', text: null });
+        await fx('PUT', `${B}/blocks`, { id: 'serve', text: null }, ctx.lockCookie);
       }],
       ['잠금: 5번 틀리면 기다려야 하고, 그동안은 설정 바꾸기·끄기도 막힌다 (암호 맞히기 막기)', async () => {
         const { fx } = ctx;

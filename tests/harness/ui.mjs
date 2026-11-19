@@ -273,6 +273,49 @@ export async function runUi() {
         eq(errs, [], '주보 화면 오류');
         noErrors('접는 4면 주보');
       }],
+      ['주보 편집(예제): 교회 소식 글을 고쳐 저장하면 미리보기에 나오고, 4면에서 자리를 바꾸면 그 면으로 옮겨지며, 되돌리면 처음대로', async () => {
+        const wk = await sampleWeek();
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await clickText('주보 편집 (배치·글 고치기)');
+        await waitText('주보 편집 ·');
+        const frameText = async (fmt, want, timeout = 8000) => {
+          const end = Date.now() + timeout; let t = '';
+          while (Date.now() < end) {
+            const f = page.frames().find((x) => x.url().includes(`bulletin?format=${fmt}`));
+            t = f ? await f.evaluate(() => document.body?.innerText || '').catch(() => '') : '';
+            if (want(t)) return t;
+            await sleep(200);
+          }
+          throw new Error(`미리보기(${fmt})가 기대대로 바뀌지 않았습니다: ${t.slice(0, 200)}`);
+        };
+        await frameText('print', (t) => t.includes('교회 소식'));
+        // 교회 소식 칸의 [글 고치기]
+        await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('교회 소식'))?.querySelector('button:last-of-type')?.click());
+        const ta = await page.waitForSelector('textarea[aria-label="교회 소식 이번 주 글"]');
+        await ta.click({ clickCount: 3 }); await page.keyboard.press('Backspace'); await ta.type('화면시험 고친 광고');
+        await clickText('이번 주에 저장');
+        await waitText('이 예배 주보에 저장했습니다');
+        await waitText('이번 주 고침');
+        await frameText('print', (t) => t.includes('화면시험 고친 광고'));
+        // 접는 4면: 교회 소식을 4면(뒷면)으로
+        await clickText('접는 4면', '.dialog button');
+        await frameText('fold4', (t) => t.includes('화면시험 고친 광고'));
+        await page.select('select[aria-label="교회 소식 면"]', '4');
+        await waitText('배치를 저장했습니다');
+        const layout = (await hub.get('/api/ws/sample/bulletin')).data.layout;
+        eq(layout.find((x) => x.id === 'ann').face, 4, '저장된 교회 소식 면');
+        const html = (await hub.get(`/api/ws/sample/weeks/${wk}/bulletin?format=fold4`)).data;
+        ok(html.indexOf('<p class="fno">4</p>') < html.indexOf('화면시험 고친 광고') && html.indexOf('화면시험 고친 광고') < html.indexOf('<p class="fno">2</p>'), '고친 광고가 4면에 있어야 함');
+        // 되돌리기
+        await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('교회 소식'))?.querySelector('button:last-of-type')?.click());
+        await clickText('자동 내용으로 되돌리기');
+        await waitText('자동 내용으로 되돌렸습니다');
+        await frameText('fold4', (t) => !t.includes('화면시험 고친 광고'));
+        await page.select('select[aria-label="교회 소식 면"]', '3');
+        await waitText('배치를 저장했습니다');
+        await clickText('닫기', '.dialog button');
+        noErrors('주보 편집');
+      }],
       ['잠금: 설정에서 켜고 🔒 잠그기를 누르면 성도·재정이 잠금 화면이 되고, 암호를 넣으면 열린다', async () => {
         await go('/settings?ws=real');
         await waitText('잠금 (성도·재정·행정)');
