@@ -36,6 +36,8 @@ export async function runApi() {
   const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base, GEMINI_API_BASE: gemini.base } });
   const { get, post, put, del } = hub;
   const ctx = {};
+  // AI 키 바꾸기: 앞의 점검에서 켠 잠금이 남아 있으므로, 잠금을 푼 쪽지(주인)로 바꾼다
+  const putKey = (b) => (ctx.fx ? ctx.fx('PUT', '/api/ai/gemini-key', b, ctx.lockCookie) : put('/api/ai/gemini-key', b));
   try {
     return await runChecks('서버·API 점검', [
       ['서버: 켜지면 상태 확인에 버전이 나온다', async () => {
@@ -579,6 +581,19 @@ export async function runApi() {
         await fx('PUT', `${B}/blocks`, { id: 'ann', text: null });
         await fx('PUT', `${B}/blocks`, { id: 'serve', text: null }, ctx.lockCookie);
       }],
+      ['잠금 중 제미나이 키: 잠금 암호 없이는 키를 넣거나 지울 수 없다 (몰래 다른 키로 바꿔 AI 요청을 가로채지 못하게)', async () => {
+        const { fx } = ctx;
+        const cfg = path.join(hub.dataDir, 'praiseflow-config.json');
+        const before = fs.existsSync(cfg) ? fs.readFileSync(cfg, 'utf8') : null;
+        const r = await fx('PUT', '/api/ai/gemini-key', { key: 'AIzaSy-thief_KEY.0123456789abcdefghijk' });
+        eq(r.status, 423, '잠금 암호 없이 키 넣기');
+        has(r.data?.error || '', '잠금 암호', '잠금 안내');
+        eq(fs.existsSync(cfg) ? fs.readFileSync(cfg, 'utf8') : null, before, '설정 파일은 그대로');
+        eq((await fx('PUT', '/api/ai/gemini-key', { key: '' })).status, 423, '잠금 암호 없이 키 지우기');
+        const okd = await fx('PUT', '/api/ai/gemini-key', { key: 'AIzaSy-owner_KEY.0123456789abcdefghijk' }, ctx.lockCookie);
+        eq([okd.status, okd.data?.gemini?.loggedIn], [200, true], '잠금을 푼 쪽지로는 키를 넣을 수 있음');
+        eq((await fx('PUT', '/api/ai/gemini-key', { key: '' }, ctx.lockCookie)).status, 200, '잠금을 푼 쪽지로 키 지우기');
+      }],
       ['잠금: 5번 틀리면 기다려야 하고, 그동안은 설정 바꾸기·끄기도 막힌다 (암호 맞히기 막기)', async () => {
         const { fx } = ctx;
         for (let i = 0; i < 5; i++) await fx('POST', `${R}/lock/unlock`, { pin: '0000' });
@@ -637,9 +652,9 @@ export async function runApi() {
         const cfg = path.join(hub.dataDir, 'praiseflow-config.json');
         fs.writeFileSync(cfg, JSON.stringify({ provider: 'claude', codexModel: '그대로 둘 값' }));
         eq(expectStatus(await get('/api/ai?refresh'), 200, 'AI 상태').gemini.loggedIn, false, '키가 없으면 제미나이 연결 안 됨');
-        expectStatus(await put('/api/ai/gemini-key', { key: '짧은키' }), 400, '키 모양이 아니면 거절');
+        expectStatus(await putKey({ key: '짧은키' }), 400, '키 모양이 아니면 거절');
         const KEY = 'AIzaSy-test_KEY.0123456789abcdefghijk';
-        const st = expectStatus(await put('/api/ai/gemini-key', { key: KEY }), 200, '키 저장');
+        const st = expectStatus(await putKey({ key: KEY }), 200, '키 저장');
         eq(st.gemini.loggedIn, true, '키를 넣으면 제미나이 연결됨');
         ok(!JSON.stringify(st).includes(KEY) && !JSON.stringify((await get('/api/ai')).data).includes(KEY), '키 값은 화면으로 돌려주지 않음');
         const saved = JSON.parse(fs.readFileSync(cfg, 'utf8'));
@@ -665,7 +680,7 @@ export async function runApi() {
           has(e.message, '사용 한도', '한도 안내');
         } finally { gem.mode = 'ok'; }
         // 키 지우기
-        eq(expectStatus(await put('/api/ai/gemini-key', { key: '' }), 200, '키 지우기').gemini.loggedIn, false, '지우면 연결 안 됨');
+        eq(expectStatus(await putKey({ key: '' }), 200, '키 지우기').gemini.loggedIn, false, '지우면 연결 안 됨');
         eq(JSON.parse(fs.readFileSync(cfg, 'utf8')).apiKey, undefined, '설정 파일에서도 지워짐');
       }],
       ['주보 꾸미기: 기본 스타일을 고르면 세 모양 주보에 겉모양만 덧붙고, AI 스타일은 위험한 설정(바깥 주소·숨기기·자리 바꾸기)을 거른 뒤 미리보기·적용·내 스타일 저장이 된다', async () => {
@@ -704,7 +719,7 @@ export async function runApi() {
         } finally { await put(`${S}/bulletin/style`, { theme: 'basic', customCss: '', myStyles: [] }); }
         // 실제 자료: 연결된 AI(가짜 제미나이)로 만들기 — 분위기 설명만 보내고 교회 자료는 보내지 않음
         const cfg = path.join(hub.dataDir, 'praiseflow-config.json');
-        expectStatus(await put('/api/ai/gemini-key', { key: 'AIzaSy-style_KEY.0123456789abcdefghijk' }), 200, '키 저장');
+        expectStatus(await putKey({ key: 'AIzaSy-style_KEY.0123456789abcdefghijk' }), 200, '키 저장');
         try {
           const church = (await get(R)).data.church.name;
           const a = expectStatus(await post(`${R}/bulletin/style/ai`, { desc: '고풍스러운 명조체, 진한 초록', provider: 'gemini' }), 200, 'AI로 꾸밈 만들기');
@@ -726,7 +741,7 @@ export async function runApi() {
           ok(!(await get(`${R}/weeks/${wr.id}/bulletin?format=print`)).data.includes('#1d5c3a'), '기본 모양으로 돌아감');
         } finally {
           await put(`${R}/bulletin/style`, { theme: 'basic', customCss: '', myStyles: [] });
-          await put('/api/ai/gemini-key', { key: '' });
+          await putKey({ key: '' });
           ok(fs.existsSync(cfg), '설정 파일');
         }
       }],

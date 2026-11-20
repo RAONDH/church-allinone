@@ -226,7 +226,11 @@ async function api(req, res, url) {
   }
   // ── AI 연결 상태와 제미나이 API 키 (키 값은 돌려주지 않음. 키는 PraiseFlow 와 함께 씀) ──
   if (p === '/api/ai' && req.method === 'GET') return send(res, 200, await aiStatus(url.searchParams.has('refresh')));
-  if (p === '/api/ai/gemini-key' && req.method === 'PUT') { const b = await body(req); await wrapB(() => setGeminiKey(b.key)); return send(res, 200, await aiStatus(true)); }
+  if (p === '/api/ai/gemini-key' && req.method === 'PUT') {
+    // 잠금 중에는 키를 바꾸지 못하게 (몰래 다른 사람 키로 바꿔 회의록 정리 등 AI 요청을 그쪽으로 보내지 못하게)
+    if (!spaces.real.store.broken) await wrapB(() => lock.guardAny(spaces.real.store.db, req, 'AI 키를 바꾸려면'));
+    const b = await body(req); await wrapB(() => setGeminiKey(b.key)); return send(res, 200, await aiStatus(true));
+  }
   // ── 백업 (실제 교회 자료만) ──
   if (p === '/api/backup' && req.method === 'GET') return send(res, 200, backups.view());
   // ── 자료 파일이 깨졌을 때 복구 (실제 교회 자료) ──

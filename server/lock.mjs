@@ -70,8 +70,8 @@ export function makeLock({ dataDir }) {
       if (!alive(l, req)) throw bad(`${AREAS[area]} 자료는 잠겨 있습니다. 잠금 암호를 넣어 주세요.`, 423);
     },
     /** 백업 받기·되살리기: 잠금을 켰으면 풀린 상태여야 한다 */
-    guardAny(db, req) {
-      if (db.lock?.hash && !alive(db.lock, req)) throw bad('잠금을 켜 두어서, 백업 기능을 쓰려면 먼저 잠금 암호를 넣어 주세요.', 423);
+    guardAny(db, req, what = '백업 기능을 쓰려면') {
+      if (db.lock?.hash && !alive(db.lock, req)) throw bad(`잠금을 켜 두어서, ${what} 먼저 잠금 암호를 넣어 주세요.`, 423);
     },
     unlock(db, pin, res) {
       const l = db.lock;
