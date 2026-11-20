@@ -12,7 +12,7 @@ import zlib from 'node:zlib';
 import { cmpVer } from './boot.mjs';
 import { TRUSTED_KEYS } from './update-keys.mjs';
 
-const REPO = 'raon-easypaster/church-allinone';
+const REPO = 'RAONDH/church-allinone';
 // 시험할 때만 가짜 배포 서버를 쓸 수 있게 환경 변수로 바꿀 수 있다 (이 컴퓨터에서 켤 때 정하는 값)
 const LATEST_URL = process.env.UPDATE_LATEST_URL || `https://api.github.com/repos/${REPO}/releases/latest`;
 const ALLOWED = process.env.UPDATE_ALLOWED_PREFIX || `https://github.com/${REPO}/releases/download/`;
