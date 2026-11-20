@@ -517,3 +517,6 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .style-css textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 .style-css { margin-top: 10px; }
 .style-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #0002; }
+.style-combo { margin: 6px 0; }
+.combo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 10px; }
+.combo-grid label { display: flex; flex-direction: column; font-size: .85rem; gap: 2px; }

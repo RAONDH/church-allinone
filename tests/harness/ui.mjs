@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import puppeteer from 'puppeteer-core';
+import { PRINT_ROOM_MM, PAD, GAP, FONT } from '../../server/bulletin.mjs';
 import { startHub, runChecks, eq, ok, has, fakeServer, fakeMusicSheet, json, tmpDir, sleep, HUB } from './lib.mjs';
 
 export function findChrome() {
@@ -401,10 +402,10 @@ export async function runUi() {
         const look = async () => {
           const p2 = await browser.newPage();
           await p2.goto(U(`${B}?format=print`), { waitUntil: 'load' }); await sleep(300);
-          const r = await p2.evaluate(() => {
-            const m = document.createElement('div'); m.style.height = '192mm'; document.body.appendChild(m); const room = m.getBoundingClientRect().height; m.remove();
+          const r = await p2.evaluate((roomMm) => {
+            const m = document.createElement('div'); m.style.height = `${roomMm}mm`; document.body.appendChild(m); const room = m.getBoundingClientRect().height; m.remove();
             return [...document.querySelectorAll('.sheet>div')].map((c) => { const top = c.getBoundingClientRect().top; const used = Math.max(...[...c.children].map((x) => x.getBoundingClientRect().bottom - top)); return { fill: c.dataset.fill ?? null, lh: getComputedStyle(c).lineHeight, used: Math.round(used), room: Math.round(room) }; });
-          });
+          }, PRINT_ROOM_MM);
           const warn = await p2.evaluate(() => document.querySelector('.how.warn')?.innerText || '');
           await p2.close(); return { cols: r, warn };
         };
@@ -421,7 +422,7 @@ export async function runUi() {
         } finally { await hub.put('/api/ws/sample/bulletin', settings); }
         noErrors('주보 자동 채우기');
       }],
-      ['주보 꾸미기(예제): 기본 스타일을 고르면 미리보기가 바뀌고 [적용]하면 주보에 들어가며, AI로 만든 스타일은 내 스타일로 저장하고 기본으로 되돌릴 수 있다', async () => {
+      ['주보 꾸미기(예제): 기본 스타일을 고르면 미리보기가 바뀌고 [적용]하면 주보에 들어가며, AI로 만든 스타일은 내 스타일로 저장하고 기본으로 되돌릴 수 있고, 직접 조합한 스타일도 적용된다', async () => {
         const wk = await sampleWeek();
         const S = '/api/ws/sample';
         const look = async (want, timeout = 8000) => {   // 미리보기 틀의 교회 이름 글꼴·강조색
@@ -459,15 +460,25 @@ export async function runUi() {
         await clickText('이 스타일로 적용');
         await waitText('스타일을 주보에 적용했습니다');
         eq((await hub.get(`${S}/bulletin/style`)).data.theme, 'basic', '기본으로 되돌림');
+        // 직접 조합하기: 색을 바꾸면 미리보기가 그 색으로
+        await page.select('select[aria-label="조합 색"]', 'burgundy');
+        await look((v) => v.a === '#7a1f2b');
+        await page.select('select[aria-label="조합 단 바탕"]', 'leftDark');
+        await waitText('조합: 버건디');
+        await clickText('이 스타일로 적용');
+        await waitText('스타일을 주보에 적용했습니다');
+        const v2 = (await hub.get(`${S}/bulletin/style`)).data;
+        ok(v2.theme === 'custom' && v2.customCss.includes('--a:#7a1f2b') && v2.customCss.includes('.sheet>div:first-child{background:var(--a)'), '조합한 스타일 적용', v2.customName);
+        await hub.put(`${S}/bulletin/style`, { theme: 'basic', customCss: '' });
         await clickText('닫기', '.dialog .row.end button');
         await hub.put(`${S}/bulletin/style`, { myStyles: [] });
         noErrors('주보 꾸미기');
       }],
-      ['주보 기본 스타일 14가지(예제): 어느 스타일을 골라도 예제 주보 2단·4면이 종이를 넘치지 않고 화면 오류가 없다', async () => {
+      ['주보 기본 스타일 24가지(예제): 어느 스타일을 골라도 예제 주보 2단·4면이 종이를 넘치지 않고 화면 오류가 없다', async () => {
         const wk = await sampleWeek();
         const S = '/api/ws/sample';
         const themes = (await hub.get(`${S}/bulletin/style`)).data.themes;
-        eq(themes.length, 14, '스타일 수');
+        eq(themes.length, 24, '스타일 수');
         const bad = [];
         const p2 = await browser.newPage();
         try {
@@ -483,6 +494,29 @@ export async function runUi() {
         } finally { await p2.close(); }
         eq(bad, [], '넘치는 스타일');
         noErrors('주보 기본 스타일');
+      }],
+      ['주보 여백(예제): 2단·4면 모두 사방 안쪽 여백과 단 사이 간격을 넉넉히 두고(인쇄할 때도 같음) 본문 글자를 키웠으며, 예제 주보는 넘치지 않는다', async () => {
+        ok(PAD >= 7 && GAP >= 18 && FONT >= 12.5, '여백·간격·글자 크기 값', { PAD, GAP, FONT });
+        const wk = await sampleWeek();
+        const p2 = await browser.newPage();
+        try {
+          for (const fmt of ['print', 'fold4']) for (const media of ['screen', 'print']) {
+            await p2.emulateMediaType(media);
+            await p2.goto(U(`/api/ws/sample/weeks/${wk}/bulletin?format=${fmt}`), { waitUntil: 'load' }); await sleep(150);
+            const g = await p2.evaluate(() => {
+              const mm = (() => { const m = document.createElement('div'); m.style.width = '100mm'; document.body.appendChild(m); const w = m.getBoundingClientRect().width / 100; m.remove(); return w; })();
+              const sh = document.querySelector('.sheet').getBoundingClientRect();
+              const [a, b] = [...document.querySelectorAll('.sheet')[0].children].map((x) => x.getBoundingClientRect());
+              return { pad: (a.left - sh.left) / mm, padTop: (a.top - sh.top) / mm, gap: (b.left - a.right) / mm, font: parseFloat(getComputedStyle(document.querySelector('.sheet')).fontSize), fit: (window.__fit || []).filter((x) => x.status === 'over').map((x) => x.name) };
+            });
+            const where = `${fmt}·${media}`;
+            ok(Math.abs(g.pad - PAD) < 0.5 && Math.abs(g.padTop - PAD) < 0.5, `${where}: 사방 안쪽 여백 ${PAD}mm`, g);
+            ok(Math.abs(g.gap - GAP) < 0.5, `${where}: 단 사이 ${GAP}mm`, g);
+            eq(g.font, FONT, `${where}: 본문 글자 크기`);
+            if (media === 'screen') eq(g.fit, [], `${where}: 넘치는 단·면 없음`);
+          }
+        } finally { await p2.close(); }
+        noErrors('주보 여백');
       }],
       ['저장 안 한 입력(예제): 성도 추가 창에 이름을 쓰고 바깥을 누르면 묻고, [취소]하면 창과 입력이 그대로 남는다', async () => {
         await go('/people?ws=sample');

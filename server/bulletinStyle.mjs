@@ -20,6 +20,7 @@ const ALLOWED = new Set([
   'text-align', 'text-decoration', 'text-decoration-color', 'text-decoration-style', 'text-transform', 'text-underline-offset',
   'padding', 'padding-top', 'padding-bottom', 'padding-left', 'padding-right',
   'list-style-type',
+  'background-size', 'background-repeat', 'background-position',
 ]);
 // 주보 틀이 쓰는 변수(줄간격 자동 채우기)는 못 바꾸게 하고, 색 변수(--a 등)만 받는다
 const VAR_OK = /^--(a|ink|muted|[a-z][a-z0-9-]{0,20})$/;
@@ -84,6 +85,79 @@ function okFontSize(v) {
 }
 
 // 기본 스타일 (AI 없이도 고를 수 있게). basic = 지금까지의 모양
+// ── 직접 조합하기: 색 · 칸 제목 · 예배 순서 · 단 바탕 · 교회 안내 · 글꼴을 골라 하나의 스타일로 ──
+// 실제 주보에서 흔한 모양(제목 띠, 가운데 큰 제목, 이름표, 점선 이음 순서, 단마다 다른 바탕, 아래 안내 상자)을 부품으로 나눴다.
+export const COLORS = {
+  green: { name: '초록', a: '#2f5d50', al: '#e8f0ec' },
+  navy: { name: '남색', a: '#1f3b63', al: '#e8edf4' },
+  slate: { name: '회청', a: '#5f7f8b', al: '#e6eef1' },
+  mocha: { name: '모카 갈색', a: '#7d6555', al: '#f3eee9' },
+  burgundy: { name: '버건디', a: '#7a1f2b', al: '#f6e9eb' },
+  purple: { name: '보라', a: '#5a2d82', al: '#f0eaf6' },
+  gold: { name: '금색', a: '#8a6d1f', al: '#f6f0dc' },
+  gray: { name: '회색', a: '#5c5c5c', al: '#eeeeee' },
+  black: { name: '흑백', a: '#000000', al: '#f2f2f2' },
+};
+export const HEADINGS = {
+  line: { name: '왼쪽 선', css: '' },
+  band: { name: '색 띠', css: 'h3{border-left:none;background:var(--a);color:#fff;padding:2px 8px;font-weight:600}' },
+  tint: { name: '옅은 띠', css: 'h3{border-left:none;background:var(--al);color:var(--a);padding:3px 8px}' },
+  center: { name: '가운데 큰 제목', css: 'h3{border-left:none;text-align:center;font-size:1.25rem;color:var(--ink);padding:2px 0}' },
+  under: { name: '밑줄', css: 'h3{border-left:none;border-bottom:2px solid var(--a);padding:0 0 2px}' },
+  lines: { name: '위아래 선', css: 'h3{border-left:none;text-align:center;border-top:1px solid var(--a);border-bottom:1px solid var(--a);padding:1px 0;letter-spacing:.2em}' },
+  tag: { name: '이름표', css: 'h3{border-left:14px solid var(--al);color:var(--ink);padding-left:8px}' },
+  pill: { name: '둥근 띠', css: 'h3{border-left:none;background:var(--al);color:var(--a);padding:2px 12px;border-radius:999px}' },
+};
+export const ORDERS = {
+  dots: { name: '점선 밑줄', css: '' },
+  leader: { name: '점선 이음 (굵은 순서)', css: '.order li{border-bottom:none;padding:3px 0;background-image:radial-gradient(circle,#a9a9a9 0.8px,transparent 1.3px);background-size:5px 4px;background-repeat:repeat-x;background-position:0 60%}\n.order li span{font-weight:700;background-color:var(--bg);padding-right:6px}\n.order li em{background-color:var(--bg);padding-left:6px}' },
+  solid: { name: '가는 실선', css: '.order li{border-bottom:1px solid var(--al)}' },
+  plain: { name: '줄 없이 넉넉히', css: '.order li{border-bottom:none;padding:4px 0}\n.order li span{font-weight:600}' },
+  stripe: { name: '줄무늬', css: '.order li{border-bottom:none;padding:3px 6px}\n.order li:nth-child(odd){background:var(--al)}' },
+};
+// 진한 바탕(흰 글자) 단 안에서 색이 따로 정해진 글자들을 희게
+const dark = (sel) => `${sel}{background:var(--a);color:#fff;padding:6px 10px;--bg:var(--a);--ink:#fff;--muted:#e9eef0}
+${sel} .church,${sel} h3,${sel} .motto,${sel} .sermon .title{color:#fff}
+${sel} h3{border-color:#ffffff99}
+${sel} blockquote{background:#ffffff26}
+${sel} .order li{border-color:#ffffff55}
+${sel} .cover{background:none;border-color:#ffffff99}`;
+const tintPanel = (sel) => `${sel}{background:var(--al);padding:6px 10px;--bg:var(--al)}`;
+export const PANELS = {
+  none: { name: '없음 (흰 바탕)', css: '' },
+  leftTint: { name: '왼쪽 단 옅은 바탕', css: tintPanel('.sheet>div:first-child') },
+  rightTint: { name: '오른쪽 단 옅은 바탕', css: tintPanel('.sheet>div:last-child') },
+  leftDark: { name: '왼쪽 단 진한 바탕 (흰 글자)', css: dark('.sheet>div:first-child') },
+  rightDark: { name: '오른쪽 단 진한 바탕 (흰 글자)', css: dark('.sheet>div:last-child') },
+  boxes: { name: '칸마다 상자', css: 'section{background:var(--al);border-radius:8px;padding:5px 10px;--bg:var(--al)}\n.info{border-top:none}' },
+};
+export const INFOS = {
+  plain: { name: '기본', css: '' },
+  box: { name: '옅은 상자', css: '.info{border-top:none;background:var(--al);border-radius:6px;padding:8px 6px}' },
+  band: { name: '진한 띠', css: '.info{border-top:none;background:var(--a);color:#fff;border-radius:4px;padding:8px 6px;--muted:#eef;--ink:#fff}' },
+};
+export const FONTS = {
+  gothic: { name: '고딕', css: '' },
+  serif: { name: '명조', css: "body,.sheet,.m{font-family:'Nanum Myeongjo','AppleMyungjo','Batang','Noto Serif KR',serif}" },
+};
+export const COMBO_PARTS = { color: COLORS, heading: HEADINGS, order: ORDERS, panel: PANELS, info: INFOS, font: FONTS };
+export const COMBO_DEFAULT = { color: 'green', heading: 'line', order: 'dots', panel: 'none', info: 'plain', font: 'gothic' };
+/** 고른 부품으로 스타일 만들기: { css, name, parts } (모르는 값은 기본 부품) */
+export function composeStyle(raw = {}) {
+  const parts = {};
+  for (const [k, list] of Object.entries(COMBO_PARTS)) parts[k] = Object.hasOwn(list, raw[k]) ? raw[k] : COMBO_DEFAULT[k];
+  const c = COLORS[parts.color];
+  const css = [
+    `:root{--a:${c.a};--al:${c.al};--bg:#fff}`,
+    `blockquote{background:var(--al)}`,
+    `.cover{border-color:var(--a);background:linear-gradient(#ffffff,var(--al))}`,
+    HEADINGS[parts.heading].css, ORDERS[parts.order].css, PANELS[parts.panel].css, INFOS[parts.info].css, FONTS[parts.font].css,
+  ].filter(Boolean).join('\n');
+  const name = `${c.name} · ${HEADINGS[parts.heading].name} · ${ORDERS[parts.order].name.replace(/ \(.*\)$/, '')}${parts.panel !== 'none' ? ` · ${PANELS[parts.panel].name.replace(/ \(.*\)$/, '')}` : ''}${parts.font === 'serif' ? ' · 명조' : ''}`;
+  return { css, name, parts };
+}
+const combo = (name, p) => ({ name, css: composeStyle(p).css, parts: composeStyle(p).parts });
+
 export const THEMES = {
   basic: { name: '기본', css: '' },
   warm: {
@@ -224,6 +298,17 @@ blockquote{background:#fbf0ef;border-left:4px solid #a3222a;border-radius:0}
 table.serve th{color:#1f6b3a}
 .cover{border:3px double #1f6b3a;background:linear-gradient(#ffffff,#fbeeee)}`,
   },
+  // ── 조합으로 만든 기본 스타일 10가지 (단 바탕·가운데 제목·점선 이음 등 여러 모양) ──
+  slatePanel: combo('회청 진한 왼쪽 단', { color: 'slate', heading: 'center', order: 'leader', panel: 'leftDark', info: 'box' }),
+  slateSoft: combo('회청 옅은 오른쪽 단', { color: 'slate', heading: 'center', order: 'leader', panel: 'rightTint', info: 'box' }),
+  mochaTag: combo('모카 이름표', { color: 'mocha', heading: 'tag', order: 'leader', panel: 'rightTint', info: 'box' }),
+  mochaDark: combo('모카 진한 오른쪽 단', { color: 'mocha', heading: 'tint', order: 'leader', panel: 'rightDark', info: 'plain' }),
+  navyClean: combo('남색 밑줄 상자', { color: 'navy', heading: 'under', order: 'solid', panel: 'boxes', info: 'plain' }),
+  goldThanks: combo('금색 감사 (명조)', { color: 'gold', heading: 'lines', order: 'leader', panel: 'none', info: 'box', font: 'serif' }),
+  burgundyBox: combo('버건디 옅은 띠 (명조)', { color: 'burgundy', heading: 'tint', order: 'plain', panel: 'boxes', info: 'plain', font: 'serif' }),
+  monoLeader: combo('흑백 점선 이음', { color: 'black', heading: 'under', order: 'leader', panel: 'none', info: 'box' }),
+  greenStripe: combo('초록 줄무늬', { color: 'green', heading: 'pill', order: 'stripe', panel: 'leftTint', info: 'band' }),
+  purpleSoft: combo('보라 옅은 오른쪽 단', { color: 'purple', heading: 'band', order: 'leader', panel: 'rightTint', info: 'box' }),
 };
 
 /** 설정의 꾸밈 부분 정리: theme(고른 스타일), customCss(AI·내 스타일), customName, myStyles */

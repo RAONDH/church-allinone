@@ -161,7 +161,7 @@ const pastorName = (p) => (/(목사|전도사|선교사)$/.test(p.trim()) ? p : 
 // 분량(pct·status)은 넓히기 전의 원래 분량으로 알린다
 function fitScript(kind, auto) {
   return `<script>addEventListener('load',()=>{const sh=document.querySelector('.sheet');const lh=parseFloat(getComputedStyle(sh).lineHeight)||17;let parts;
-if('${kind}'==='print'){const m=document.createElement('div');m.style.height='192mm';document.body.appendChild(m);const room=m.getBoundingClientRect().height;m.remove();parts=[...document.querySelectorAll('.sheet>div')].map((c,i)=>({name:i?'오른쪽 단':'왼쪽 단',key:i?'R':'L',el:c,room}));}
+if('${kind}'==='print'){const m=document.createElement('div');m.style.height='${PRINT_ROOM_MM}mm';document.body.appendChild(m);const room=m.getBoundingClientRect().height;m.remove();parts=[...document.querySelectorAll('.sheet>div')].map((c,i)=>({name:i?'오른쪽 단':'왼쪽 단',key:i?'R':'L',el:c,room}));}
 else parts=[...document.querySelectorAll('.face')].map(f=>{const n=+((f.querySelector('.fno')||{}).textContent||1);return{name:n+'면',key:String(n),el:f,room:f.clientHeight,cover:n===1}}).sort((a,b)=>a.key-b.key);
 const use=p=>{const top=p.el.getBoundingClientRect().top;return p.cover?(p.el.firstElementChild||p.el).scrollHeight:Math.max(0,...[...p.el.children].filter(c=>!c.classList.contains('fno')).map(c=>c.getBoundingClientRect().bottom+(parseFloat(getComputedStyle(c).marginBottom)||0)-top))};
 const out=parts.map(p=>{const top=p.el.getBoundingClientRect().top;const used=use(p);const over=used>p.room+2;
@@ -175,6 +175,11 @@ if(${auto ? 'true' : 'false'})for(const p of parts){if(p.cover||use(p)>=p.room-8
 window.__fit=out;try{if(parent!==window)parent.postMessage({type:'bulletin-fit',format:'${kind}',parts:out.map(({cutName,...o})=>o)},location.origin)}catch(e){}});</script>`;
 }
 
+// 인쇄 종이 모양 (A4 가로, 프린터 여백 8mm 안쪽): 사방 안쪽 여백 PAD, 두 단·두 면 사이 GAP, 본문 글자 FONT
+// 종이 가장자리에서 글까지 = 8 + PAD mm, 가운데 접는 선 양쪽 = GAP/2 mm
+export const PAD = 7, GAP = 18, FONT = 12.5;
+/** 2단 인쇄용 한 단에 들어가는 높이 (194mm - 위아래 여백, 2mm 넉넉히) */
+export const PRINT_ROOM_MM = 194 - PAD * 2 - 2;
 export function bulletinHtml(d, format = 'print') {
   const { s, church, week: w } = d;
   const songs = d.order.filter((i) => i.type === 'song' || i.type === 'score');
@@ -222,7 +227,7 @@ export function bulletinHtml(d, format = 'print') {
   const left = `${head}${blocksWhere((x) => x.col === 'L')}`;
   const right = `${lockNote(false)}${blocksWhere((x) => x.col === 'R')}`;
   const title = `${church.name || '교회'} 주보 ${w.date}`;
-  const css = `:root{--a:#2f5d50;--ink:#222;--muted:#666}*{box-sizing:border-box}body{margin:0;color:var(--ink);font:15px/1.6 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;background:#f3f1ec}
+  const css = `:root{--a:#2f5d50;--ink:#222;--muted:#666}*{box-sizing:border-box}body{margin:0;color:var(--ink);font:16px/1.6 'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;background:#f3f1ec}
 header{text-align:center;border-bottom:2px solid var(--a);padding-bottom:8px;margin-bottom:10px}.church{font-size:1.5rem;font-weight:800;margin:0;color:var(--a)}.motto{margin:2px 0;font-weight:700}.date{margin:4px 0 0;color:var(--muted)}
 section{margin:0 0 12px}h3{font-size:1rem;margin:0 0 6px;color:var(--a);border-left:4px solid var(--a);padding-left:8px}
 .order{list-style:none;padding:0;margin:0}.order li{display:flex;justify-content:space-between;border-bottom:1px dotted #bbb;padding:2px 0}.order em{font-style:normal;color:var(--muted);font-size:.85em}
@@ -238,8 +243,8 @@ table.serve{width:100%;border-collapse:collapse;font-size:.9em;margin-bottom:6px
     return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>${css}
 .m{max-width:560px;margin:0 auto;background:#fff;padding:18px 16px 30px;min-height:100vh}${theme}</style></head><body><main class="m">${left}${right}</main></body></html>`;
   }
-  const sheetCss = `@page{size:A4 landscape;margin:8mm}.sheet{width:281mm;height:194mm;margin:12px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:12mm;padding:6mm;box-shadow:0 1px 6px #0002;font-size:11.5px;line-height:1.45;overflow:hidden}.sheet section{margin-bottom:8px}.sheet .order li{padding:0}.sheet header{margin-bottom:6px;padding-bottom:4px}.sheet .church{font-size:1.35rem}.sheet .logo{max-height:16mm;max-width:45mm}.sheet section.photo img{max-height:55mm}.sheet section.photo.sm img{max-height:38mm}.sheet>div,.sheet .face{line-height:var(--lh,1.45)}.sheet>div section,.sheet .face section{margin-bottom:var(--gap,8px)}
-.sheet>div{overflow:hidden}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:0;width:auto;height:194mm;break-after:page;page-break-after:always}.sheet:last-of-type{break-after:auto;page-break-after:auto}.tools,.how{display:none}}`;
+  const sheetCss = `@page{size:A4 landscape;margin:8mm}.sheet{width:281mm;height:194mm;margin:12px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:${GAP}mm;padding:${PAD}mm;box-shadow:0 1px 6px #0002;font-size:${FONT}px;line-height:1.45;overflow:hidden}.sheet section{margin-bottom:8px}.sheet .order li{padding:0}.sheet header{margin-bottom:6px;padding-bottom:4px}.sheet .church{font-size:1.5rem}.sheet h3{font-size:1.06rem}.sheet .logo{max-height:16mm;max-width:45mm}.sheet section.photo img{max-height:48mm}.sheet section.photo.sm img{max-height:32mm}.sheet>div,.sheet .face{line-height:var(--lh,1.45)}.sheet>div section,.sheet .face section{margin-bottom:var(--gap,8px)}
+.sheet>div{overflow:hidden}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:${PAD}mm;width:auto;height:194mm;break-after:page;page-break-after:always}.sheet:last-of-type{break-after:auto;page-break-after:auto}.tools,.how{display:none}}`;
   if (format === 'fold4') {
     // 접는 4면: 1쪽(바깥) = 왼쪽 4면(뒷표지) · 오른쪽 1면(표지) / 2쪽(안쪽) = 왼쪽 2면 · 오른쪽 3면
     const cover = `<div class="cover">${logo}<p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="verse">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)}<br>${esc(w.name || '주일 예배')}</p>${w.sermonTitle ? `<p class="ctitle">「${esc(w.sermonTitle)}」</p>` : ''}${w.passage ? `<p class="cpass">${esc(w.passage)}</p>` : ''}${church.pastor ? `<p class="cby">담임 ${esc(church.pastor)}</p>` : ''}</div>`;
@@ -259,8 +264,8 @@ ${sheetCss}.face{position:relative;overflow:hidden;height:100%}.fno{position:abs
 ${fitScript('fold4', s.autoFill)}</body></html>`;
   }
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}
-@page{size:A4 landscape;margin:8mm}.sheet{width:281mm;min-height:194mm;margin:12px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:10mm;padding:6mm;box-shadow:0 1px 6px #0002;font-size:11.5px;line-height:1.45}.sheet section{margin-bottom:8px}.sheet .order li{padding:0}.sheet header{margin-bottom:6px;padding-bottom:4px}.sheet .church{font-size:1.35rem}.sheet .logo{max-height:16mm;max-width:45mm}.sheet section.photo img{max-height:55mm}.sheet section.photo.sm img{max-height:38mm}.sheet>div{line-height:var(--lh,1.45)}.sheet>div section{margin-bottom:var(--gap,8px)}
-.sheet>div{overflow:hidden}.how{max-width:281mm;margin:12px auto 0;padding:8px 12px;background:#fde8e8;border:1px solid #e9a3a3;border-radius:8px;font-size:13px}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:0;width:auto;min-height:0}.tools,.how{display:none}}${theme}</style></head>
+@page{size:A4 landscape;margin:8mm}.sheet{width:281mm;min-height:194mm;margin:12px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:${GAP}mm;padding:${PAD}mm;box-shadow:0 1px 6px #0002;font-size:${FONT}px;line-height:1.45}.sheet section{margin-bottom:8px}.sheet .order li{padding:0}.sheet header{margin-bottom:6px;padding-bottom:4px}.sheet .church{font-size:1.5rem}.sheet h3{font-size:1.06rem}.sheet .logo{max-height:16mm;max-width:45mm}.sheet section.photo img{max-height:48mm}.sheet section.photo.sm img{max-height:32mm}.sheet>div{line-height:var(--lh,1.45)}.sheet>div section{margin-bottom:var(--gap,8px)}
+.sheet>div{overflow:hidden}.how{max-width:281mm;margin:12px auto 0;padding:8px 12px;background:#fde8e8;border:1px solid #e9a3a3;border-radius:8px;font-size:13px}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:${PAD}mm;width:auto;min-height:0}.tools,.how{display:none}}${theme}</style></head>
 <body><div class="tools"><button onclick="print()">인쇄</button></div><div class="sheet"><div>${left}</div><div>${right}</div></div>
 ${fitScript('print', s.autoFill)}</body></html>`;
 }

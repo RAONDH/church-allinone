@@ -699,7 +699,7 @@ export async function runApi() {
         const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
         const B = `${S}/weeks/${wk.id}/bulletin`;
         const v0 = expectStatus(await get(`${S}/bulletin/style`), 200, '꾸밈 목록');
-        eq(v0.themes.map((t) => t.id), ['basic', 'warm', 'classic', 'modern', 'bandGray', 'bandNavy', 'bandGreen', 'card', 'pastel', 'paper', 'burgundy', 'mono', 'purple', 'christmas'], '기본 스타일 목록 (처음 4가지 + 주보 모양 10가지)');
+        eq(v0.themes.map((t) => t.id), ['basic', 'warm', 'classic', 'modern', 'bandGray', 'bandNavy', 'bandGreen', 'card', 'pastel', 'paper', 'burgundy', 'mono', 'purple', 'christmas', 'slatePanel', 'slateSoft', 'mochaTag', 'mochaDark', 'navyClean', 'goldThanks', 'burgundyBox', 'monoLeader', 'greenStripe', 'purpleSoft'], '기본 스타일 목록 (처음 4가지 + 주보 모양 10가지 + 조합 10가지)');
         eq(v0.theme, 'basic', '처음에는 기본 모양');
         const plain = (await get(`${B}?format=print`)).data;
         ok(!plain.includes('주보 꾸미기'), '기본 모양에는 꾸밈을 덧붙이지 않음');
@@ -756,6 +756,27 @@ export async function runApi() {
           await putKey({ key: '' });
           ok(fs.existsSync(cfg), '설정 파일');
         }
+      }],
+      ['주보 직접 조합하기: 색·칸 제목·예배 순서·단 바탕·교회 안내·글꼴 부품을 골라 스타일을 만들고, 어느 조합이든 거르기를 그대로 통과하며, 모르는 값은 기본 부품으로', async () => {
+        const v = (await get(`${S}/bulletin/style`)).data;
+        eq(Object.keys(v.parts), ['color', 'heading', 'order', 'panel', 'info', 'font'], '부품 종류');
+        ok(v.parts.color.length >= 9 && v.parts.heading.length >= 8 && v.parts.order.length >= 5 && v.parts.panel.length >= 6, '부품 수', Object.fromEntries(Object.entries(v.parts).map(([k, l]) => [k, l.length])));
+        const r = expectStatus(await post(`${S}/bulletin/style/compose`, { color: 'slate', heading: 'center', order: 'leader', panel: 'leftDark', info: 'box', font: 'serif' }), 200, '조합하기');
+        has(r.css, '--a:#5f7f8b', '고른 색');
+        has(r.css, '.sheet>div:first-child{background:var(--a);color:#fff', '왼쪽 단 진한 바탕');
+        has(r.css, 'radial-gradient', '점선 이음');
+        has(r.name, '회청 · 가운데 큰 제목', '조합 이름');
+        const d = expectStatus(await post(`${S}/bulletin/style/compose`, { color: 'evil', heading: '__proto__', order: 'constructor' }), 200, '모르는 값');
+        eq(d.parts, v.partsDefault, '모르는 값은 기본 부품');
+        // 모든 부품을 한 번씩 (나머지는 기본): 거르면 하나도 빠지지 않아야 함
+        const lost = [];
+        for (const [k, list] of Object.entries(v.parts)) for (const x of list) {
+          const c = (await post(`${S}/bulletin/style/compose`, { [k]: x.id })).data.css;
+          const saved = (await put(`${S}/bulletin/style`, { theme: 'custom', customCss: c })).data.customCss;
+          if (saved.replace(/\s/g, '') !== c.replace(/\s/g, '')) lost.push(`${k}:${x.id}`);
+        }
+        await put(`${S}/bulletin/style`, { theme: 'basic', customCss: '' });
+        eq(lost, [], '저장할 때 빠지는 부품');
       }],
       ['자료 손상 복구: 자료 파일이 깨지면 빈 자료로 덮어쓰지 않고 저장을 멈춘 뒤, 고른 백업으로 되살린다', async () => {
         const ext = tmpDir('broken-ext');

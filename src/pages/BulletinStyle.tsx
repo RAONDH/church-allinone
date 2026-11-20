@@ -9,8 +9,10 @@ import { api } from '../lib/api';
 import type { Week } from '../lib/types';
 import { Preview, type FitPart } from './BulletinEditor';
 
-interface Theme { id: string; name: string; css: string }
-interface StyleView { themes: Theme[]; theme: string; customCss: string; customName: string; myStyles: { name: string; css: string }[] }
+interface Theme { id: string; name: string; css: string; parts?: Record<string, string> | null }
+interface StyleView { themes: Theme[]; theme: string; customCss: string; customName: string; myStyles: { name: string; css: string }[]; parts: Record<string, { id: string; name: string }[]>; partsDefault: Record<string, string> }
+// 직접 조합하기의 부품 이름
+const PART_LABEL: Record<string, string> = { color: '색', heading: '칸 제목', order: '예배 순서', panel: '단 바탕', info: '교회 안내', font: '글꼴' };
 interface Pick { key: string; label: string; theme: string; customCss: string; customName: string; kind: 'theme' | 'mine' | 'current' | 'new' }
 type Fmt = 'print' | 'fold4' | 'mobile';
 const FMTS: [Fmt, string][] = [['print', '2단 인쇄용'], ['fold4', '접는 4면'], ['mobile', '휴대폰']];
@@ -34,6 +36,16 @@ export default function BulletinStyle({ week, onClose }: { week: Week; onClose: 
   const [tok, setTok] = useState('');
   const [fit, setFit] = useState<FitPart[] | null>(null);
   const [edit, setEdit] = useState('');
+  const [combo, setCombo] = useState<Record<string, string> | null>(null);
+  // 조합한 스타일을 만들어 미리보기 (저장하지 않음)
+  const compose = async (next: Record<string, string>) => {
+    setCombo(next); setMsg(null);
+    try {
+      const r = await api<{ css: string; name: string }>(`${base}/bulletin/style/compose`, { method: 'POST', body: next });
+      const p: Pick = { key: `new:${Date.now()}`, label: `조합: ${r.name}`, theme: 'custom', customCss: r.css, customName: r.name, kind: 'new' };
+      setMade(p); setSel(p); unsaved.current = true;
+    } catch (e: any) { setMsg({ ok: false, text: e.message }); }
+  };
 
   const load = useCallback(() => api<StyleView>(`${base}/bulletin/style`).then((x) => { setV(x); return x; }), [base]);
   useEffect(() => { load().catch((e) => setMsg({ ok: false, text: e.message })); }, [load]);
@@ -120,13 +132,27 @@ export default function BulletinStyle({ week, onClose }: { week: Week; onClose: 
             <div className="style-picks" role="radiogroup" aria-label="주보 스타일">
               {picks.map((p) => (
                 <span key={p.key} className={`style-pick${sel?.key === p.key ? ' on' : ''}`}>
-                  <button role="radio" aria-checked={sel?.key === p.key} onClick={() => setSel(p)}>
+                  <button role="radio" aria-checked={sel?.key === p.key} onClick={() => { setSel(p); const t = v.themes.find((x) => p.kind === 'theme' && x.id === p.theme); if (t?.parts) setCombo(t.parts); }}>
                     <span className="style-dot" aria-hidden style={{ background: dot(p.customCss || v.themes.find((t) => t.id === p.theme)?.css || '') }} />{p.label}{isNow(p) && <span className="pill done">적용 중</span>}
                   </button>
                   {p.kind === 'mine' && <button className="link small" aria-label={`내 스타일 ${p.label} 지우기`} onClick={() => delMine(+p.key.slice(2))}>✕</button>}
                 </span>
               ))}
             </div>
+
+            <fieldset className="style-combo">
+              <legend>직접 조합하기</legend>
+              <p className="muted small">색·칸 제목·예배 순서 모양·단 바탕·교회 안내·글꼴을 골라 나만의 스타일을 만듭니다. 고를 때마다 아래 미리보기가 바뀝니다. 위의 스타일을 누른 뒤 여기서 하나씩 바꿔도 됩니다.</p>
+              <div className="combo-grid">
+                {Object.entries(v.parts).map(([k, list]) => (
+                  <label key={k}>{PART_LABEL[k] || k}
+                    <select aria-label={`조합 ${PART_LABEL[k] || k}`} value={(combo || v.partsDefault)[k]} onChange={(e) => compose({ ...(combo || v.partsDefault), [k]: e.target.value })}>
+                      {list.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
 
             <fieldset className="style-ai">
               <legend>AI로 새 스타일 만들기</legend>

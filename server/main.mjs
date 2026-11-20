@@ -19,7 +19,7 @@ import { makeUpdater } from './update.mjs';
 import { bootingFile } from './boot.mjs';
 import { makeBackups } from './backup.mjs';
 import { makeLock, areaOf } from './lock.mjs';
-import { cleanCss, cleanStyleSettings, THEMES, STYLE_SYSTEM, stylePrompt, extractCss, sampleStyle } from './bulletinStyle.mjs';
+import { cleanCss, cleanStyleSettings, composeStyle, COMBO_PARTS, COMBO_DEFAULT, THEMES, STYLE_SYSTEM, stylePrompt, extractCss, sampleStyle } from './bulletinStyle.mjs';
 import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS, cleanImage, fillImages, pruneImages } from './bulletin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -533,7 +533,7 @@ async function api(req, res, url) {
   // 겉모양은 성도 정보를 드러내지 않으므로 잠금과 상관없이 바꿀 수 있다. AI 에는 분위기 설명만 보낸다(교회 자료는 보내지 않음).
   if (sub === '/bulletin/style' && req.method === 'GET') {
     const cur = cleanBulletinSettings({ ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) });
-    return send(res, 200, { themes: Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name, css: t.css })), theme: cur.theme, customCss: cur.customCss, customName: cur.customName, myStyles: cur.myStyles });
+    return send(res, 200, { themes: Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name, css: t.css, parts: t.parts || null })), parts: Object.fromEntries(Object.entries(COMBO_PARTS).map(([k, l]) => [k, Object.entries(l).map(([id, x]) => ({ id, name: x.name }))])), partsDefault: COMBO_DEFAULT, theme: cur.theme, customCss: cur.customCss, customName: cur.customName, myStyles: cur.myStyles });
   }
   if (sub === '/bulletin/style' && req.method === 'PUT') {
     const b = await body(req);
@@ -543,6 +543,8 @@ async function api(req, res, url) {
     await sp.store.save();
     return send(res, 200, { theme: db.bulletin.theme, customCss: db.bulletin.customCss, customName: db.bulletin.customName, myStyles: db.bulletin.myStyles });
   }
+  // 직접 조합하기: 고른 부품으로 스타일 만들기 (저장하지 않음 · 미리보기 후 적용)
+  if (sub === '/bulletin/style/compose' && req.method === 'POST') return send(res, 200, composeStyle(await body(req)));
   if (sub === '/bulletin/style/ai' && req.method === 'POST') {
     const b = await body(req);
     const desc = String(b.desc ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, 500);
