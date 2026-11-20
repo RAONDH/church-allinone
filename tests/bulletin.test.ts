@@ -28,3 +28,13 @@ describe('주보 꾸미기', () => {
     }
   });
 });
+
+describe('주보 그림 정리', () => {
+  it('표지 사진·로고로 쓰는 그림은 오래되어도 지우지 않고, 아무 데도 안 쓰는 오래된 그림만 지운다', async () => {
+    const { pruneImages } = await import('../server/bulletin.mjs');
+    const old = Date.now() - 2 * 3600e3;
+    const db: any = { bulletin: { logo: 'a'.repeat(16), coverPhoto: 'b'.repeat(16) }, weeks: {}, bulletinImages: { ['a'.repeat(16)]: { at: old }, ['b'.repeat(16)]: { at: old }, ['c'.repeat(16)]: { at: old }, ['d'.repeat(16)]: { at: Date.now() } } };
+    pruneImages(db);
+    expect(Object.keys(db.bulletinImages).sort()).toEqual(['a'.repeat(16), 'b'.repeat(16), 'd'.repeat(16)]);
+  });
+});

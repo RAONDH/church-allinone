@@ -569,6 +569,29 @@ export async function runApi() {
           eq((await fetch(`${hub.base}${S}/bulletin/images/${id}`)).status, 200, '확정본이 가리키는 그림은 지우지 않음');
         } finally { await put(`${B}/blocks`, { id: 'photo', text: null }); await put(`${S}/bulletin`, settings); }
       }],
+      ['주보 표지 사진(예제): 표지 사진을 넣으면 4면 표지 전체와 2단·휴대폰 머리에 사진이 들어가고(띠는 끌 수 있음), 확정본에도 남으며, 쓰는 동안 지워지지 않는다', async () => {
+        const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const settings = (await get(`${S}/bulletin`)).data;
+        eq([settings.coverPhoto, settings.coverBanner], ['', true], '처음에는 표지 사진 없음 · 띠 켜짐');
+        ok(!(await get(`${B}?format=fold4`)).data.includes('class="cover pc"'), '사진이 없으면 예전 표지');
+        const { id } = expectStatus(await post(`${S}/bulletin/images`, { data: PNG }), 200, '표지 사진 올리기');
+        try {
+          eq(expectStatus(await put(`${S}/bulletin`, { ...settings, coverPhoto: id }), 200, '표지 사진 저장').coverPhoto, id, '저장된 표지 사진');
+          has((await get(`${B}?format=fold4`)).data, `<div class="cover pc"><img class="cover-bg" src="${PNG}" alt=""><div class="cover-in">`, '4면 표지를 사진으로');
+          has((await get(`${B}?format=print`)).data, `<header class="pc"><img class="cover-bg" src="${PNG}"`, '2단 머리에 사진 띠');
+          has((await get(`${B}?format=mobile`)).data, '<header class="pc">', '휴대폰 머리에 사진 띠');
+          await put(`${S}/bulletin`, { ...settings, coverPhoto: id, coverBanner: false });
+          ok(!(await get(`${B}?format=print`)).data.includes('<header class="pc">'), '띠를 끄면 2단 머리는 예전대로');
+          has((await get(`${B}?format=fold4`)).data, 'class="cover pc"', '띠를 꺼도 4면 표지는 사진');
+          eq(expectStatus(await put(`${S}/bulletin`, { ...settings, coverPhoto: '../x' }), 200, '이상한 번호').coverPhoto, '', '그림 번호 모양이 아니면 버림');
+          await put(`${S}/bulletin`, { ...settings, coverPhoto: id });
+          const fv = expectStatus(await post(`${B}/finals`, {}), 200, '표지 사진 주보 확정').finals[0].v;
+          await put(`${S}/bulletin`, settings);
+          has((await get(`${B}?final=${fv}&format=fold4`)).data, `class="cover-bg" src="${PNG}"`, '사진을 빼도 확정본 표지는 그대로');
+        } finally { await put(`${S}/bulletin`, settings); }
+      }],
       ['잠금 중 주보 편집: 봉사·일정·생일 칸은 자동 내용도 고친 글도 보이지 않고 고칠 수 없다 (광고는 고칠 수 있음)', async () => {
         const { fx } = ctx;
         const B = `${R}/weeks/${ctx.week}/bulletin`;

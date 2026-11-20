@@ -12,7 +12,7 @@ const day = (d) => { const x = new Date(`${d}T00:00:00`); return `${x.getMonth()
 const md = (d) => `${+d.slice(5, 7)}/${+d.slice(8, 10)}`;
 export const addDays = (s, n) => { const d = new Date(`${s}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-export const BULLETIN_DEFAULTS = { address: '', phone: '', worshipTimes: '', account: '', motto: '', mottoVerse: '', logo: '', autoFill: true, showOrder: true, showSummary: true, showServe: true, showEvents: true, showBirthdays: false };
+export const BULLETIN_DEFAULTS = { address: '', phone: '', worshipTimes: '', account: '', motto: '', mottoVerse: '', logo: '', coverPhoto: '', coverBanner: true, autoFill: true, showOrder: true, showSummary: true, showServe: true, showEvents: true, showBirthdays: false };
 
 // 주보의 칸: [id, 제목, 켜고 끄는 예전 설정 이름]. 표지(교회 이름·날짜)는 늘 맨 위(4면은 1면)에 있다
 export const BLOCKS = [
@@ -40,7 +40,7 @@ export function cleanBulletinSettings(b = {}) {
   for (const it of layout) { const flag = BLOCKS.find(([id]) => id === it.id)[2]; if (flag && b[flag] !== undefined) it.on = !!b[flag]; }
   const on = (id) => layout.find((x) => x.id === id).on;
   return {
-    address: t('address', 200), phone: t('phone', 60), worshipTimes: t('worshipTimes', 600), account: t('account', 120), motto: t('motto', 100), mottoVerse: t('mottoVerse', 200), logo: IMG_ID.test(b.logo || '') ? b.logo : '', autoFill: b.autoFill !== false, ...cleanStyleSettings(b),
+    address: t('address', 200), phone: t('phone', 60), worshipTimes: t('worshipTimes', 600), account: t('account', 120), motto: t('motto', 100), mottoVerse: t('mottoVerse', 200), logo: IMG_ID.test(b.logo || '') ? b.logo : '', coverPhoto: IMG_ID.test(b.coverPhoto || '') ? b.coverPhoto : '', coverBanner: b.coverBanner !== false, autoFill: b.autoFill !== false, ...cleanStyleSettings(b),
     showOrder: on('order'), showSummary: on('summary'), showServe: on('serve'), showEvents: on('events'), showBirthdays: on('births'),
     layout,
   };
@@ -80,10 +80,10 @@ export function cleanImage(dataUrl) {
 }
 /** 확정본 HTML 안의 그림 자리표(allinone-img:번호)를 실제 그림으로 */
 export const fillImages = (html, db) => html.replace(/allinone-img:([a-f0-9]{16})/g, (_, id) => db.bulletinImages?.[id]?.data || '');
-/** 쓰지 않는 그림 정리: 로고·이번 주 사진·확정본에서 가리키지 않고, 올린 지 1시간이 지난 것 */
+/** 쓰지 않는 그림 정리: 로고·표지 사진·이번 주 사진·확정본에서 가리키지 않고, 올린 지 1시간이 지난 것 */
 export function pruneImages(db) {
   const imgs = db.bulletinImages; if (!imgs) return;
-  const used = new Set([db.bulletin?.logo]);
+  const used = new Set([db.bulletin?.logo, db.bulletin?.coverPhoto]);
   for (const w of Object.values(db.weeks || {})) {
     used.add(w.bulletin?.blocks?.photo?.img);
     for (const f of w.bulletin?.finals || []) for (const h of Object.values(f.html || {})) for (const x of String(h).matchAll(/allinone-img:([a-f0-9]{16})/g)) used.add(x[1]);
@@ -132,7 +132,7 @@ export function bulletinData({ db, week, order, hide = {}, imgToken = false }) {
   // 이번 주에 고친 칸 (잠금 중에는 성도·행정 정보가 든 칸의 고친 글도 넣지 않는다)
   const over = {};
   for (const [id, v] of Object.entries(week.bulletin?.blocks || {})) if (TITLE[id] && !(PRIVATE_BLOCKS[id] || []).some((a) => hide[a])) over[id] = v;
-  return { img, logo: img(s.logo), over, s, church: db.church || {}, week, order: order || [], summary: sum, serveThis: hideServe ? null : serveOn(date, addDays(date, 6)), serveNext: hideServe ? null : serveOn(addDays(date, 7), addDays(date, 13)), birthdays: hide.people ? [] : birthdays, events: hide.admin ? [] : events, hidden: !!(hide.people || hide.admin) };
+  return { img, logo: img(s.logo), cover: img(s.coverPhoto), over, s, church: db.church || {}, week, order: order || [], summary: sum, serveThis: hideServe ? null : serveOn(date, addDays(date, 6)), serveNext: hideServe ? null : serveOn(addDays(date, 7), addDays(date, 13)), birthdays: hide.people ? [] : birthdays, events: hide.admin ? [] : events, hidden: !!(hide.people || hide.admin) };
 }
 
 // 칸 하나의 자동 내용을 글로 (편집 창에서 고칠 때 처음 글로 씀)
@@ -223,7 +223,9 @@ export function bulletinHtml(d, format = 'print') {
   };
   const blocksWhere = (f) => s.layout.filter(f).map(block).join('');
   const lockNote = (short) => (d.hidden ? `<p class="small" style="color:#a33">🔒 잠금이 걸려 있어 생일·봉사·일정은 넣지 않았습니다.${short ? '' : ' 잠금을 풀고 다시 열어 주세요.'}</p>` : '');
-  const head = `<header>${logo}<p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="small">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)} · ${esc(w.name || '주일 예배')}</p></header>`;
+  // 표지 사진: 접는 4면은 표지(1면) 전체를 사진으로 덮고, 2단·휴대폰은 맨 위 머리말을 사진 띠로 (글자는 사진 위에 흰 글씨)
+  const bg = d.cover ? `<img class="cover-bg" src="${d.cover}" alt="">` : '';
+  const head = `<header${bg && s.coverBanner ? ' class="pc"' : ''}>${bg && s.coverBanner ? bg : ''}${logo}<p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="small">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)} · ${esc(w.name || '주일 예배')}</p></header>`;
   const left = `${head}${blocksWhere((x) => x.col === 'L')}`;
   const right = `${lockNote(false)}${blocksWhere((x) => x.col === 'R')}`;
   const title = `${church.name || '교회'} 주보 ${w.date}`;
@@ -235,7 +237,16 @@ section{margin:0 0 12px}h3{font-size:1rem;margin:0 0 6px;color:var(--a);border-l
 blockquote{margin:0 0 6px;padding:6px 10px;background:#eef3f0;border-radius:6px;font-weight:700}.ann{padding-left:1.2em;margin:0}.ann li{margin:2px 0}
 table.serve{width:100%;border-collapse:collapse;font-size:.9em;margin-bottom:6px}.serve th{text-align:left;width:5.5em;color:var(--muted);font-weight:400;padding:2px 4px}.serve td{padding:2px 4px;border-bottom:1px dotted #ddd}
 .ev{list-style:none;padding:0;margin:0}.small{font-size:.85em}.b{font-weight:700;margin:4px 0 2px}.info{border-top:1px solid #ccc;padding-top:8px;font-size:.85em;color:var(--muted);text-align:center}.info p{margin:2px 0}.times{color:var(--ink)}
-.sm{font-size:.86em}section.sm h3{font-size:1rem}.logo{display:block;margin:0 auto 4px;max-height:60px;max-width:180px;object-fit:contain}section.photo img{display:block;margin:0 auto;max-width:100%;max-height:420px;object-fit:contain}section.photo.sm img{max-height:260px}.photo .cap{text-align:center;margin:4px 0 0}.tools{position:fixed;right:12px;top:12px;display:flex;gap:6px}.tools button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer}`;
+.sm{font-size:.86em}section.sm h3{font-size:1rem}.logo{display:block;margin:0 auto 4px;max-height:60px;max-width:180px;object-fit:contain}section.photo img{display:block;margin:0 auto;max-width:100%;max-height:420px;object-fit:contain}section.photo.sm img{max-height:260px}.photo .cap{text-align:center;margin:4px 0 0}.tools{position:fixed;right:12px;top:12px;display:flex;gap:6px}.tools button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.cover-bg{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;z-index:0}
+header.pc{position:relative;overflow:hidden;border:none;border-radius:6px;padding:7mm 4mm 5mm;color:#fff;text-shadow:0 1px 3px #0009}
+header.pc::after,.cover.pc::after{content:'';position:absolute;left:0;top:0;right:0;bottom:0;background:linear-gradient(rgba(0,0,0,.22),rgba(0,0,0,.58));z-index:0}
+header.pc>*:not(.cover-bg){position:relative;z-index:1}
+header.pc .church,header.pc .date,header.pc .motto,header.pc .small{color:#fff}
+.cover.pc{position:relative;overflow:hidden;border:none;padding:0;background:#333;color:#fff;text-shadow:0 1px 4px #000a}
+.cover.pc .cover-in{position:relative;z-index:1;width:100%;padding:12mm 8mm;display:flex;flex-direction:column;align-items:center}
+.cover.pc .church,.cover.pc .date,.cover.pc .verse,.cover.pc .cby,.cover.pc .motto,.cover.pc .ctitle,.cover.pc .cpass{color:#fff}`;
   // 주보 꾸미기(겉모양만): 각 모양의 <style> 맨 끝에 덧붙여 기본 모양을 덮어쓴다
   const tcss = themeCss(s);
   const theme = tcss ? `\n/* 주보 꾸미기 */\n${tcss}` : '';
@@ -247,7 +258,7 @@ table.serve{width:100%;border-collapse:collapse;font-size:.9em;margin-bottom:6px
 .sheet>div{overflow:hidden}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:${PAD}mm;width:auto;height:194mm;break-after:page;page-break-after:always}.sheet:last-of-type{break-after:auto;page-break-after:auto}.tools,.how{display:none}}`;
   if (format === 'fold4') {
     // 접는 4면: 1쪽(바깥) = 왼쪽 4면(뒷표지) · 오른쪽 1면(표지) / 2쪽(안쪽) = 왼쪽 2면 · 오른쪽 3면
-    const cover = `<div class="cover">${logo}<p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="verse">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)}<br>${esc(w.name || '주일 예배')}</p>${w.sermonTitle ? `<p class="ctitle">「${esc(w.sermonTitle)}」</p>` : ''}${w.passage ? `<p class="cpass">${esc(w.passage)}</p>` : ''}${church.pastor ? `<p class="cby">담임 ${esc(church.pastor)}</p>` : ''}</div>`;
+    const cover = `<div class="cover${bg ? ' pc' : ''}">${bg}${bg ? '<div class="cover-in">' : ''}${logo}<p class="church">${esc(church.name || '')}</p>${s.motto ? `<p class="motto">${esc(s.motto)}</p>` : ''}${s.mottoVerse ? `<p class="verse">${esc(s.mottoVerse)}</p>` : ''}<p class="date">${day(w.date)}<br>${esc(w.name || '주일 예배')}</p>${w.sermonTitle ? `<p class="ctitle">「${esc(w.sermonTitle)}」</p>` : ''}${w.passage ? `<p class="cpass">${esc(w.passage)}</p>` : ''}${church.pastor ? `<p class="cby">담임 ${esc(church.pastor)}</p>` : ''}${bg ? '</div>' : ''}</div>`;
     const face = (n) => blocksWhere((x) => x.face === n);
     const p4 = `<div class="face"><p class="fno">4</p>${lockNote(true)}${face(4)}</div>`;
     const p1 = `<div class="face">${cover}</div>`;

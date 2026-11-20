@@ -520,3 +520,5 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .style-combo { margin: 6px 0; }
 .combo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 10px; }
 .combo-grid label { display: flex; flex-direction: column; font-size: .85rem; gap: 2px; }
+
+.cover-thumb { width: 96px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; }

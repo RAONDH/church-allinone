@@ -614,6 +614,44 @@ export async function runUi() {
           noErrors('주보 확정본');
         } finally { await hub.put('/api/ws/sample/bulletin', settings); }
       }],
+      ['주보 표지 사진(예제): 고정 정보에서 표지 사진을 넣고 저장하면 접는 4면 표지 전체를 사진이 덮고 글자는 흰색으로 얹히며, 2단 맨 위에도 사진 띠가 들어가고 넘치지 않는다', async () => {
+        const wk = await sampleWeek();
+        const S = '/api/ws/sample';
+        const settings = (await hub.get(`${S}/bulletin`)).data;
+        const png = path.join(files, '표지사진.png');
+        fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+        try {
+          await go(`/week/${wk}/outputs?ws=sample`);
+          await clickText('주보 고정 정보');
+          const input = await page.waitForSelector('input[aria-label="표지 사진 파일"]');
+          await input.uploadFile(png);
+          await page.waitForSelector('img.cover-thumb', { timeout: 15000 });
+          await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.trim() === '저장')?.click());
+          await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 5000 });
+          const id = (await hub.get(`${S}/bulletin`)).data.coverPhoto;
+          ok(/^[a-f0-9]{16}$/.test(id || ''), '표지 사진이 저장됨', id);
+          const p2 = await browser.newPage();
+          try {
+            await p2.goto(U(`${S}/weeks/${wk}/bulletin?format=fold4`), { waitUntil: 'load' }); await sleep(200);
+            const c = await p2.evaluate(() => {
+              const cv = document.querySelector('.cover.pc'), bg = cv?.querySelector('img.cover-bg');
+              if (!cv || !bg) return null;
+              const a = cv.getBoundingClientRect(), b = bg.getBoundingClientRect(), face = cv.parentElement.getBoundingClientRect();
+              return { cover: [Math.round(a.width), Math.round(a.height)], img: [Math.round(b.width), Math.round(b.height)], face: [Math.round(face.width), Math.round(face.height)], color: getComputedStyle(cv.querySelector('.church')).color, adjust: getComputedStyle(cv).printColorAdjust || getComputedStyle(cv).webkitPrintColorAdjust, fit: (window.__fit || []).filter((x) => x.status === 'over').map((x) => x.name) };
+            });
+            ok(c, '4면 표지에 사진 표지');
+            eq(c.img, c.cover, '사진이 표지 전체를 덮음');
+            ok(Math.abs(c.cover[0] - c.face[0]) <= 1 && Math.abs(c.cover[1] - c.face[1]) <= 1, '표지가 1면 전체', c);
+            eq(c.color, 'rgb(255, 255, 255)', '표지 글자는 흰색');
+            eq(c.adjust, 'exact', '인쇄할 때도 바탕·사진을 그대로 찍음');
+            eq(c.fit, [], '4면 넘침 없음');
+            await p2.goto(U(`${S}/weeks/${wk}/bulletin?format=print`), { waitUntil: 'load' }); await sleep(200);
+            const h = await p2.evaluate(() => ({ band: !!document.querySelector('header.pc img.cover-bg'), fit: (window.__fit || []).filter((x) => x.status === 'over').map((x) => x.name) }));
+            eq(h, { band: true, fit: [] }, '2단 맨 위 사진 띠, 넘침 없음');
+          } finally { await p2.close(); }
+        } finally { await hub.put(`${S}/bulletin`, settings); }
+        noErrors('주보 표지 사진');
+      }],
       ['주보 사진(예제): 주보 편집의 사진·포스터 칸에서 사진 파일을 고르면 크기를 줄여 올리고 미리보기에 나오며, 빼면 사라진다', async () => {
         const wk = await sampleWeek();
         const png = path.join(files, '행사사진.png');

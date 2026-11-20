@@ -9,7 +9,7 @@ import BulletinEditor from './BulletinEditor';
 import BulletinStyle from './BulletinStyle';
 import { shrinkImage } from '../lib/image';
 
-interface BulletinSettings { logo?: string; autoFill?: boolean; address: string; phone: string; worshipTimes: string; account: string; motto: string; mottoVerse: string; showOrder: boolean; showSummary: boolean; showServe: boolean; showEvents: boolean; showBirthdays: boolean }
+interface BulletinSettings { logo?: string; coverPhoto?: string; coverBanner?: boolean; autoFill?: boolean; address: string; phone: string; worshipTimes: string; account: string; motto: string; mottoVerse: string; showOrder: boolean; showSummary: boolean; showServe: boolean; showEvents: boolean; showBirthdays: boolean }
 
 export default function BulletinCard({ week }: { week: Week }) {
   const { base } = useApp();
@@ -52,6 +52,14 @@ function SettingsDialog({ s, onClose, onSaved }: { s: BulletinSettings; onClose:
   const t = (k: keyof BulletinSettings) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const c = (k: keyof BulletinSettings) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.checked });
   const [logoBusy, setLogoBusy] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  // 표지 사진: 크게(긴 쪽 1800px) 줄여 올린다. [저장]을 눌러야 주보에 들어감
+  const upCover = async (file: File) => {
+    setCoverBusy(true); setErr('');
+    try { const data = await shrinkImage(file, { maxSide: 1800, maxBytes: 700 * 1024 }); const r = await api<{ id: string }>(`${base}/bulletin/images`, { method: 'POST', body: { data } }); setF((x) => ({ ...x, coverPhoto: r.id })); }
+    catch (e: any) { setErr(e.message); }
+    setCoverBusy(false);
+  };
   // 로고: 크기를 줄여 올리고 번호만 설정에 넣는다 ([저장]을 눌러야 주보에 들어감)
   const upLogo = async (file: File) => {
     setLogoBusy(true); setErr('');
@@ -70,6 +78,13 @@ function SettingsDialog({ s, onClose, onSaved }: { s: BulletinSettings; onClose:
           <label className="btn small">{logoBusy ? '줄이는 중…' : f.logo ? '로고 바꾸기' : '교회 로고 넣기'}<input type="file" hidden accept="image/*" aria-label="교회 로고 파일" disabled={logoBusy} onChange={(e) => { const x = e.target.files?.[0]; if (x) upLogo(x); e.target.value = ''; }} /></label>
           {f.logo && <button className="link small" onClick={() => setF({ ...f, logo: '' })}>로고 빼기</button>}
           <span className="muted small">주보 맨 위(접는 4면은 표지)에 들어갑니다. 크기를 줄여 저장합니다.</span>
+        </div>
+        <div className="logo-row">
+          {f.coverPhoto ? <img className="cover-thumb" src={`${base}/bulletin/images/${f.coverPhoto}`} alt="표지 사진" /> : <span className="muted small">표지 사진 없음</span>}
+          <label className="btn small">{coverBusy ? '줄이는 중…' : f.coverPhoto ? '표지 사진 바꾸기' : '표지 사진 넣기'}<input type="file" hidden accept="image/*" aria-label="표지 사진 파일" disabled={coverBusy} onChange={(e) => { const x = e.target.files?.[0]; if (x) upCover(x); e.target.value = ''; }} /></label>
+          {f.coverPhoto && <button className="link small" onClick={() => setF({ ...f, coverPhoto: '' })}>표지 사진 빼기</button>}
+          <span className="muted small">접는 4면 주보의 표지(1면) 전체를 이 사진으로 덮고, 교회 이름·날짜·설교 제목을 사진 위에 흰 글씨로 얹습니다.</span>
+          {f.coverPhoto && <label className="check small"><input type="checkbox" checked={f.coverBanner !== false} onChange={(e) => setF({ ...f, coverBanner: e.target.checked })} />2단 인쇄용·휴대폰 주보의 맨 위에도 사진 띠로 넣기</label>}
         </div>
         <div className="form-grid">
           <label>표어<input value={f.motto} onChange={t('motto')} placeholder="예: 말씀으로 함께 걷는 교회" /></label>
