@@ -4,10 +4,15 @@ import { serveOf } from './serve';
 import { addDays, ymd } from './week';
 import { lunarToSolar } from './lunar';
 
-export const STATUS_LABEL: Record<Member['status'], string> = { active: '재적', inactive: '쉬는 중', moved: '이명', deceased: '별세' };
+export const STATUS_LABEL: Record<Member['status'], string> = { active: '재적', inactive: '쉬는 중', absent: '비출석', moved: '이명', deceased: '별세', other: '기타' };
+/** 가족 관계 고르기 (예전에 직접 적은 다른 말도 그대로 둔다) */
+export const RELATIONS = ['세대주', '배우자', '자녀', '부모', '기타'];
+/** 직분 고르기 도움말 (직접 적어도 됨) */
+export const ROLES = ['목사', '부목사', '전도사', '장로', '안수집사', '권사', '집사', '성도', '학생'];
 export const VISIT_KINDS = ['심방', '전화', '병원', '새가족', '상담', '기타'];
 export const BAPTISMS = ['', '학습', '세례', '유아세례', '입교'];
-const isCurrent = (m: Member) => m.status === 'active' || m.status === 'inactive';
+/** 지금 교회 식구 (이명·별세가 아닌 분): 재적·쉬는 중·비출석·기타. 생일·심방·봉사·증명서 대상 */
+export const isCurrent = (m: Pick<Member, 'status'>) => m.status !== 'moved' && m.status !== 'deceased';
 
 const daysBetween = (a: string, b: string) => Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000);
 

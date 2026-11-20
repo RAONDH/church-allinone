@@ -115,6 +115,115 @@ h3{border-left:none;text-transform:uppercase;letter-spacing:.06em;font-size:.82r
 blockquote{background:#f4f4f4;border-radius:0}
 .cover{border:none;border-radius:0;background:#fafafa}`,
   },
+  // ── 아래 10가지: 실제 교회 주보에서 흔히 쓰는 모양(제목 띠·상자·종이·절기 색 등)을 겉모양만으로 옮긴 것 ──
+  bandGray: {
+    name: '회색 제목 띠',
+    css: `:root{--a:#6f6f6f;--ink:#222;--muted:#666}
+header{border-bottom:3px solid #8a8a8a}
+.church{color:#333}
+h3{border-left:none;background:#8a8a8a;color:#fff;padding:2px 8px;font-weight:600;letter-spacing:.03em}
+table.serve th{background:#eeeeee;color:#333;text-align:center}
+table.serve td{border-bottom:1px solid #cfcfcf}
+.order li{border-bottom:1px solid #d6d6d6}
+blockquote{background:#f1f1f1;border-left:4px solid #8a8a8a;border-radius:0}
+.cover{border-color:#8a8a8a;background:linear-gradient(#ffffff,#f0f0f0)}`,
+  },
+  bandNavy: {
+    name: '남색 제목 띠',
+    css: `:root{--a:#1f3b63;--ink:#1c2430;--muted:#5d6878}
+header{border-bottom:3px solid #1f3b63}
+h3{border-left:none;background:#1f3b63;color:#fff;padding:2px 8px;font-weight:600}
+table.serve th{background:#e8edf4;color:#1f3b63}
+.order li{border-bottom:1px solid #d5dce6}
+blockquote{background:#eef2f8;border-left:4px solid #1f3b63;border-radius:0}
+.info{border-top:2px solid #1f3b63}
+.cover{border-color:#1f3b63;background:linear-gradient(#f7f9fc,#e6ecf4)}`,
+  },
+  bandGreen: {
+    name: '숲 초록 띠',
+    css: `:root{--a:#2c5e3f;--ink:#1f2a22;--muted:#5d6b60}
+header{border-bottom:3px solid #2c5e3f}
+h3{border-left:none;background:#2c5e3f;color:#fff;padding:2px 8px;border-radius:3px;font-weight:600}
+table.serve th{background:#e7f0e9;color:#2c5e3f}
+.order li{border-bottom:1px dotted #9db9a4}
+blockquote{background:#edf4ee;border-radius:6px}
+.cover{border-color:#2c5e3f;background:linear-gradient(#f8fbf8,#e3eee5)}`,
+  },
+  card: {
+    name: '상자형',
+    css: `:root{--a:#34495e;--ink:#222;--muted:#666}
+header{border-bottom:none;background:#f3f5f8;border-radius:8px;padding:6px 4px}
+section{background:#f7f8fa;border:1px solid #dfe3e8;border-radius:8px;padding:4px 8px}
+h3{border-left:none;border-bottom:1px solid #dfe3e8;padding:0 0 2px}
+.order li{border-bottom:1px solid #e6e9ee}
+blockquote{background:#fff;border:1px solid #dfe3e8}
+.info{border-top:none}
+.cover{border:1px solid #dfe3e8;background:#f7f8fa}`,
+  },
+  pastel: {
+    name: '하늘 파스텔',
+    css: `:root{--a:#3a78b8;--ink:#2a3440;--muted:#6b7a8c}
+header{border-bottom:2px dashed #9cc3e8}
+.church{color:#2d6aa8}
+h3{border-left:none;background:#e3f0fb;color:#2d6aa8;padding:2px 10px;border-radius:999px;font-weight:700}
+.order li{border-bottom:1px dotted #b9d4ee}
+blockquote{background:#f0f7fd;border-radius:12px}
+table.serve td{border-bottom:1px dotted #c5dcf1}
+.cover{border:2px dashed #9cc3e8;background:linear-gradient(#ffffff,#eaf4fc)}`,
+  },
+  paper: {
+    name: '베이지 종이 (명조)',
+    css: `:root{--a:#6b4a2b;--ink:#2e2418;--muted:#7a6a58}
+.sheet,.m{background:#fbf6ea;font-family:'Nanum Myeongjo','AppleMyungjo','Batang','Noto Serif KR',serif}
+header{border-bottom:1px solid #b89a74}
+h3{border-left:none;border-bottom:1px solid #d9c6a8;padding:0 0 2px;letter-spacing:.08em}
+.order li{border-bottom:1px dotted #cdb894}
+blockquote{background:#f3ead8;border-radius:2px;font-style:italic}
+table.serve td{border-bottom:1px dotted #d9c6a8}
+.cover{border:1px solid #b89a74;background:#f6eedc}`,
+  },
+  burgundy: {
+    name: '버건디 고전',
+    css: `:root{--a:#7a1f2b;--ink:#231a1b;--muted:#6e5b5d}
+body,.sheet,.m{font-family:'Nanum Myeongjo','AppleMyungjo','Batang','Noto Serif KR',serif}
+header{border-bottom:4px double #7a1f2b}
+.church{letter-spacing:.1em}
+h3{border-left:none;text-align:center;border-top:1px solid #7a1f2b;border-bottom:1px solid #7a1f2b;padding:1px 0;letter-spacing:.25em}
+.sermon .title{color:#7a1f2b}
+blockquote{background:none;border-left:3px double #7a1f2b;border-radius:0}
+.cover{border:4px double #7a1f2b;background:#fffdfb}`,
+  },
+  mono: {
+    name: '흑백 (흑백 인쇄용)',
+    css: `:root{--a:#000;--ink:#000;--muted:#444}
+header{border-bottom:2px solid #000}
+.church{font-weight:900}
+h3{border-left:none;border-bottom:2px solid #000;padding:0 0 1px;font-weight:800}
+.order li{border-bottom:1px solid #bbb}
+blockquote{background:none;border:1px solid #000;border-radius:0}
+table.serve th{color:#000;font-weight:700}
+.cover{border:2px solid #000;background:#fff}`,
+  },
+  purple: {
+    name: '대림·사순 보라',
+    css: `:root{--a:#5a2d82;--ink:#241b2e;--muted:#6c5f7a}
+header{border-bottom:3px solid #5a2d82}
+h3{border-left:none;background:linear-gradient(90deg,#5a2d82,#8a63b0);color:#fff;padding:2px 8px;font-weight:600}
+.order li{border-bottom:1px dotted #b9a3d0}
+blockquote{background:#f3eef8;border-left:4px solid #5a2d82;border-radius:0}
+.cover{border-color:#5a2d82;background:linear-gradient(#ffffff,#efe7f6)}`,
+  },
+  christmas: {
+    name: '성탄 빨강·초록',
+    css: `:root{--a:#a3222a;--ink:#26201f;--muted:#6b5f5c}
+header{border-bottom:3px double #1f6b3a}
+.church{color:#a3222a}
+h3{border-left:4px solid #1f6b3a;color:#a3222a}
+.order li{border-bottom:1px dotted #c9a3a3}
+blockquote{background:#fbf0ef;border-left:4px solid #a3222a;border-radius:0}
+table.serve th{color:#1f6b3a}
+.cover{border:3px double #1f6b3a;background:linear-gradient(#ffffff,#fbeeee)}`,
+  },
 };
 
 /** 설정의 꾸밈 부분 정리: theme(고른 스타일), customCss(AI·내 스타일), customName, myStyles */

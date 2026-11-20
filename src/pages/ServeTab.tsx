@@ -13,7 +13,7 @@ const shift = (m: string, n: number) => { const d = new Date(`${m}-01T00:00:00`)
 const md = (d: string) => `${+d.slice(5, 7)}/${+d.slice(8)}`;
 const DOW = ['일', '월', '화', '수', '목', '금', '토'];
 const dow = (d: string) => DOW[new Date(d + 'T00:00:00').getDay()];
-const current = (m: Member) => m.status === 'active' || m.status === 'inactive';
+const current = (m: Member) => m.status !== 'moved' && m.status !== 'deceased';   // 이명·별세가 아닌 분
 
 export default function ServeTab({ data, members, reload }: { data: AdminData; members: Member[]; reload: () => Promise<void> }) {
   const { base, ov } = useApp();

@@ -516,3 +516,4 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .style-ai textarea, .style-css textarea { width: 100%; }
 .style-css textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 .style-css { margin-top: 10px; }
+.style-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #0002; }

@@ -4,7 +4,7 @@ import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Member, People as PeopleData, Tx, Visit } from '../lib/types';
-import { absentees, attendanceWeeks, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
+import { absentees, attendanceWeeks, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, isCurrent, RELATIONS, ROLES, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
 import { fmtDate, ymd } from '../lib/week';
 import { WeekEvents } from './Admin';
 import { WeekServe } from './ServeTab';
@@ -58,7 +58,7 @@ function MemberList({ data, reload }: { data: PeopleData; reload: () => Promise<
   const groups = useMemo(() => [...new Set(data.members.map((m) => m.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ko')), [data.members]);
   const last = useMemo(() => lastVisitMap(data.visits), [data.visits]);
   const list = data.members
-    .filter((m) => (status === 'all' ? true : status === 'current' ? m.status === 'active' || m.status === 'inactive' : m.status === status))
+    .filter((m) => (status === 'all' ? true : status === 'current' ? isCurrent(m) : m.status === status))
     .filter((m) => !group || m.group === group)
     .filter((m) => !qs.trim() || [m.name, m.phone, m.role, m.group, m.memo, m.address].some((v) => v.includes(qs.trim())))
     .sort((a, b) => a.name.localeCompare(b.name, 'ko'));
@@ -83,11 +83,13 @@ function MemberList({ data, reload }: { data: PeopleData; reload: () => Promise<
               {groups.map((g) => <option key={g}>{g}</option>)}
             </select>
             <select value={status} onChange={(e) => setStatus(e.target.value as any)}>
-              <option value="current">재적 · 쉬는 중</option>
+              <option value="current">지금 성도 (이명·별세 빼고)</option>
               <option value="active">재적만</option>
               <option value="inactive">쉬는 중</option>
+              <option value="absent">비출석</option>
               <option value="moved">이명</option>
               <option value="deceased">별세</option>
+              <option value="other">기타</option>
               <option value="all">모두</option>
             </select>
           </div>
@@ -173,7 +175,7 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
           <label className="check"><input type="checkbox" checked={f.lunar} onChange={set('lunar')} />음력 생일{f.lunar && <span className="muted small"> (해마다 양력 날짜로 바꿔 알려 드립니다)</span>}</label>
           {f.lunar && <label className="check"><input type="checkbox" checked={!!f.lunarLeap} onChange={set('lunarLeap')} />윤달 생일</label>}
           <label>전화<input value={f.phone} onChange={set('phone')} inputMode="tel" /></label>
-          <label>직분<input value={f.role} onChange={set('role')} list="roles" placeholder="성도·집사·권사·장로" /></label>
+          <label>직분<input value={f.role} onChange={set('role')} list="roles" placeholder="목사·전도사·장로·권사·집사·성도" /></label>
           <label>구역·소그룹<input value={f.group} onChange={set('group')} list="groups" /></label>
           <label>세례<select value={f.baptism} onChange={set('baptism')}>{BAPTISMS.map((b) => <option key={b} value={b}>{b || '-'}</option>)}</select></label>
           {f.baptism && <>
@@ -190,10 +192,14 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
               {others.map((m) => <option key={m.id} value={m.id}>{m.name} 님 가족으로{m.group ? ` (${m.group})` : ''}</option>)}
             </select>
           </label>
-          <label>가족 관계<input value={f.relation} onChange={set('relation')} placeholder="세대주·배우자·자녀" /></label>
+          <label>가족 관계<select value={f.relation} onChange={set('relation')}>
+            <option value="">-</option>
+            {RELATIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            {f.relation && !RELATIONS.includes(f.relation) && <option value={f.relation}>{f.relation} (예전에 적은 말)</option>}
+          </select></label>
           <label className="span2">메모<textarea rows={3} value={f.memo} onChange={set('memo')} placeholder="기도 제목, 건강, 형편 등 목회자만 보는 메모" /></label>
         </div>
-        <datalist id="roles">{['성도', '집사', '안수집사', '권사', '장로', '전도사', '학생'].map((r) => <option key={r} value={r} />)}</datalist>
+        <datalist id="roles">{ROLES.map((r) => <option key={r} value={r} />)}</datalist>
         <datalist id="groups">{[...new Set(data.members.map((m) => m.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}</datalist>
         {member && <Giving memberId={member.id} />}
         {family.length > 0 && <p className="small">가족: {family.map((m) => `${m.name}${m.relation ? `(${m.relation})` : ''}`).join(', ')}</p>}
@@ -319,7 +325,7 @@ function VisitDialog({ data, visit, preset, onClose, reload }: { data: PeopleDat
   const [f, setF] = useState({ memberIds: visit?.memberIds || preset, date: visit?.date || today, kind: visit?.kind || '심방', planned: visit?.planned ?? false, note: visit?.note || '' });
   const [pick, setPick] = useState('');
   const [err, setErr] = useState('');
-  const candidates = data.members.filter((m) => !f.memberIds.includes(m.id) && (m.status === 'active' || m.status === 'inactive')).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const candidates = data.members.filter((m) => !f.memberIds.includes(m.id) && isCurrent(m)).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
   const add = (id: string) => {
     if (!id) return;
     const m = data.members.find((x) => x.id === id);
@@ -387,7 +393,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
   const [msg, setMsg] = useState('');
   const [dirty, setDirty] = useState(false);
   useEffect(() => { setSel(new Set(data.attendance[date] || [])); setDirty(false); setMsg(''); }, [date, data.attendance]);
-  const people = data.members.filter((m) => m.status === 'active' || m.status === 'inactive' || sel.has(m.id));
+  const people = data.members.filter((m) => isCurrent(m) || sel.has(m.id));
   const byGroup = useMemo(() => {
     const g: Record<string, typeof people> = {};
     for (const m of [...people].sort((a, b) => a.name.localeCompare(b.name, 'ko'))) (g[m.group || '구역 없음'] ||= []).push(m);
@@ -413,7 +419,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
             <div className="att-grid">
               {ms.map((m) => (
                 <button key={m.id} className={`att ${sel.has(m.id) ? 'on' : ''}`} onClick={() => toggle(m.id)} aria-pressed={sel.has(m.id)}>
-                  {sel.has(m.id) ? '✓ ' : ''}{m.name}{m.status === 'inactive' && <small> 쉬는 중</small>}
+                  {sel.has(m.id) ? '✓ ' : ''}{m.name}{m.status !== 'active' && <small> {STATUS_LABEL[m.status]}</small>}
                 </button>
               ))}
             </div>

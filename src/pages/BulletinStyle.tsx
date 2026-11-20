@@ -15,6 +15,8 @@ interface Pick { key: string; label: string; theme: string; customCss: string; c
 type Fmt = 'print' | 'fold4' | 'mobile';
 const FMTS: [Fmt, string][] = [['print', '2단 인쇄용'], ['fold4', '접는 4면'], ['mobile', '휴대폰']];
 const MAX_MINE = 8;
+// 스타일 이름 앞의 색 점: 그 스타일의 강조색(--a)
+const dot = (css: string) => (css.match(/--a:\s*(#[0-9a-fA-F]{3,6})/) || [])[1] || '#2f5d50';
 
 export default function BulletinStyle({ week, onClose }: { week: Week; onClose: () => void }) {
   const { base, ws } = useApp();
@@ -119,7 +121,7 @@ export default function BulletinStyle({ week, onClose }: { week: Week; onClose: 
               {picks.map((p) => (
                 <span key={p.key} className={`style-pick${sel?.key === p.key ? ' on' : ''}`}>
                   <button role="radio" aria-checked={sel?.key === p.key} onClick={() => setSel(p)}>
-                    {p.label}{isNow(p) && <span className="pill done">적용 중</span>}
+                    <span className="style-dot" aria-hidden style={{ background: dot(p.customCss || v.themes.find((t) => t.id === p.theme)?.css || '') }} />{p.label}{isNow(p) && <span className="pill done">적용 중</span>}
                   </button>
                   {p.kind === 'mine' && <button className="link small" aria-label={`내 스타일 ${p.label} 지우기`} onClick={() => delMine(+p.key.slice(2))}>✕</button>}
                 </span>

@@ -6,7 +6,7 @@ import { uid } from './store.mjs';
 const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const str = (v, n = 200) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, n);
 const oneOf = (list, v, d = '') => (list.includes(v) ? v : d);
-export const STATUSES = ['active', 'inactive', 'moved', 'deceased'];
+export const STATUSES = ['active', 'inactive', 'absent', 'moved', 'deceased', 'other'];
 export const BAPTISMS = ['', '학습', '세례', '유아세례', '입교'];
 export const VISIT_KINDS = ['심방', '전화', '병원', '새가족', '상담', '기타'];
 
@@ -68,7 +68,7 @@ function joinFamily(db, m, withId) {
 }
 
 const CSV_COLS = [['name', '이름'], ['gender', '성별'], ['birth', '생일'], ['lunar', '음력'], ['phone', '전화'], ['address', '주소'], ['role', '직분'], ['group', '구역'], ['baptism', '세례'], ['registeredAt', '등록일'], ['status', '상태'], ['family', '가족'], ['relation', '관계'], ['memo', '메모']];
-const STATUS_LABEL = { active: '재적', inactive: '쉬는 중', moved: '이명', deceased: '별세' };
+const STATUS_LABEL = { active: '재적', inactive: '쉬는 중', absent: '비출석', moved: '이명', deceased: '별세', other: '기타' };
 const csvCell = (v) => {
   let s = String(v ?? '');
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;   // 엑셀에서 수식으로 실행되지 않게

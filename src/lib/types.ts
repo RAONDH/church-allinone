@@ -45,7 +45,7 @@ export interface Song {
 
 export interface AppInfo { id: string; name: string; desc: string; icon: string; color: string; port: number; openPath: string; installed: boolean; running: boolean; desktop?: boolean; needsInstall?: boolean }
 
-export type MemberStatus = 'active' | 'inactive' | 'moved' | 'deceased';
+export type MemberStatus = 'active' | 'inactive' | 'absent' | 'moved' | 'deceased' | 'other';
 export interface Member {
   id: string; name: string; gender: '' | '남' | '여'; birth: string; lunar: boolean; lunarLeap?: boolean; phone: string; address: string;
   role: string; group: string; baptism: string; baptismDate?: string; baptismPlace?: string; baptismBy?: string; registeredAt: string; status: MemberStatus; familyId: string; relation: string; memo: string;

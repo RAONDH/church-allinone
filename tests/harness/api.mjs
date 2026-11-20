@@ -168,6 +168,18 @@ export async function runApi() {
         expectStatus(await post(`${R}/members`, { name: '' }), 400, '이름 없이 추가하면 거절');
         ctx.kim = a.id; ctx.lee = b.id;
       }],
+      ['성도 상태·가족 관계: 비출석·기타 상태와 세대주·배우자·자녀·부모 관계를 저장하고, 명부 파일에도 그 말로 나오며, 비출석 성도도 생일 주보에 들어간다', async () => {
+        const a = expectStatus(await post(`${R}/members`, { name: '비출석시험', status: 'absent', relation: '세대주', role: '부목사', birth: '1980-01-01' }), 200, '비출석 성도 추가').member;
+        const b = expectStatus(await post(`${R}/members`, { name: '기타시험', status: 'other', relation: '부모', familyWith: a.id }), 200, '기타 성도 추가').member;
+        eq([a.status, a.relation, a.role, b.status, b.relation], ['absent', '세대주', '부목사', 'other', '부모'], '저장된 상태·관계·직분');
+        eq(expectStatus(await post(`${R}/members`, { name: '모르는상태', status: 'unknown' }), 200, '모르는 상태').member.status, 'active', '모르는 상태는 재적으로');
+        const t = (await get(`${R}/people/export.csv`)).data;
+        ok(t.includes('비출석시험,') && /비출석시험,[^\r\n]*,부목사,[^\r\n]*,비출석,[^\r\n]*,세대주,/.test(t), '명부 파일에 비출석·세대주·부목사', t.split('\r\n').find((l) => l.startsWith('비출석시험')));
+        has(t.split('\r\n').find((l) => l.startsWith('기타시험')) || '', ',기타,', '명부 파일에 기타 상태');
+        for (const id of [a.id, b.id]) await del(`${R}/members/${id}`);
+        const m = (await get(`${R}/people`)).data.members.find((x) => x.name === '모르는상태');
+        if (m) await del(`${R}/members/${m.id}`);
+      }],
       ['성도: 엑셀에서 붙여 넣은 여러 분을 한 번에 (같은 가족 글자는 한 가족)', async () => {
         const r = expectStatus(await post(`${R}/members/bulk`, { rows: [{ name: '박하나', family: '박' }, { name: '박둘', family: '박' }, { name: '' }] }), 200, '여러 명 넣기');
         eq(r.added, 2, '넣은 수');
@@ -687,7 +699,7 @@ export async function runApi() {
         const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
         const B = `${S}/weeks/${wk.id}/bulletin`;
         const v0 = expectStatus(await get(`${S}/bulletin/style`), 200, '꾸밈 목록');
-        eq(v0.themes.map((t) => t.id), ['basic', 'warm', 'classic', 'modern'], '기본 스타일 목록');
+        eq(v0.themes.map((t) => t.id), ['basic', 'warm', 'classic', 'modern', 'bandGray', 'bandNavy', 'bandGreen', 'card', 'pastel', 'paper', 'burgundy', 'mono', 'purple', 'christmas'], '기본 스타일 목록 (처음 4가지 + 주보 모양 10가지)');
         eq(v0.theme, 'basic', '처음에는 기본 모양');
         const plain = (await get(`${B}?format=print`)).data;
         ok(!plain.includes('주보 꾸미기'), '기본 모양에는 꾸밈을 덧붙이지 않음');

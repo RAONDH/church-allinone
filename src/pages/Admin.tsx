@@ -60,7 +60,7 @@ function Calendar({ data, members, visits, reload }: { data: AdminData; members:
   const weeks = monthGrid(month);
   const shift = (n: number) => { const d = new Date(+month.slice(0, 4), +month.slice(5, 7) - 1 + n, 1); setMonth(ymd(d).slice(0, 7)); };
   const name = (id: string) => members.find((m) => m.id === id)?.name || '';
-  const birthdaysOn = (d: string) => showCare ? members.filter((m) => (m.status === 'active' || m.status === 'inactive') && nextBirthday(m.birth, d, m)?.days === 0) : [];
+  const birthdaysOn = (d: string) => showCare ? members.filter((m) => m.status !== 'moved' && m.status !== 'deceased' && nextBirthday(m.birth, d, m)?.days === 0) : [];
   const visitsOn = (d: string) => showCare ? visits.filter((v) => v.planned && v.date === d) : [];
   const [gview, setGview] = useState<(ChurchEvent & { cal?: string }) | null>(null);
   const calOf = (id?: string) => data.gcals.find((g) => g.id === id);
@@ -269,7 +269,7 @@ function Certs({ data, members, reload }: { data: AdminData; members: Member[]; 
   const [purpose, setPurpose] = useState('');
   const [err, setErr] = useState('');
   const [show, setShow] = useState<Cert | null>(null);
-  const cands = useMemo(() => members.filter((m) => m.status === 'active' || m.status === 'inactive').filter((m) => type !== '세례증명서' || ['세례', '유아세례', '입교'].includes(m.baptism)).sort((a, b) => a.name.localeCompare(b.name, 'ko')), [members, type]);
+  const cands = useMemo(() => members.filter((m) => m.status !== 'moved' && m.status !== 'deceased').filter((m) => type !== '세례증명서' || ['세례', '유아세례', '입교'].includes(m.baptism)).sort((a, b) => a.name.localeCompare(b.name, 'ko')), [members, type]);
   const issue = async () => {
     setErr('');
     try { const r = await api<{ cert: Cert }>(`${base}/certs`, { method: 'POST', body: { type, memberId, purpose } }); await reload(); setShow(r.cert); } catch (e: any) { setErr(e.message); }

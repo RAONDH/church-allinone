@@ -194,6 +194,32 @@ export async function runUi() {
         await waitText('기록 모아보기');
         noErrors('성도');
       }],
+      ['성도 추가 고르기(예제): 직분 도움말에 목사·부목사·전도사, 상태에 비출석·기타, 가족 관계는 세대주·배우자·자녀·부모·기타 중에서 고르고, 비출석으로 거르면 보인다', async () => {
+        await go('/people?ws=sample');
+        await clickText('성도 추가');
+        await typeLabel('이름', '고르기시험성도');
+        const opts = await page.evaluate(() => {
+          const sel = (t) => [...document.querySelectorAll('.dialog label')].find((l) => l.innerText.trim().startsWith(t))?.querySelector('select');
+          return { roles: [...document.querySelectorAll('#roles option')].map((o) => o.value), status: [...sel('상태').options].map((o) => o.text), rel: [...sel('가족 관계').options].map((o) => o.text) };
+        });
+        ok(['목사', '부목사', '전도사'].every((r) => opts.roles.includes(r)), '직분 도움말에 목사·부목사·전도사', opts.roles);
+        ok(opts.status.includes('비출석') && opts.status.includes('기타'), '상태에 비출석·기타', opts.status);
+        eq(opts.rel, ['-', '세대주', '배우자', '자녀', '부모', '기타'], '가족 관계 고르기');
+        await page.evaluate(() => {
+          const sel = (t) => [...document.querySelectorAll('.dialog label')].find((l) => l.innerText.trim().startsWith(t)).querySelector('select');
+          const pick = (el, v) => { const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; set.call(el, v); el.dispatchEvent(new Event('change', { bubbles: true })); };
+          pick(sel('상태'), 'absent'); pick(sel('가족 관계'), '자녀');
+        });
+        await page.evaluate(() => [...document.querySelectorAll('.dialog button.primary')].find((b) => b.innerText.includes('저장'))?.click());
+        await waitText('고르기시험성도');
+        const m = (await hub.get('/api/ws/sample/people')).data.members.find((x) => x.name === '고르기시험성도');
+        eq([m?.status, m?.relation], ['absent', '자녀'], '저장된 상태·관계');
+        await page.evaluate(() => { const s = [...document.querySelectorAll('select')].find((x) => [...x.options].some((o) => o.value === 'current')); const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set; set.call(s, 'absent'); s.dispatchEvent(new Event('change', { bubbles: true })); });
+        await sleep(200);
+        has(await page.evaluate(() => document.querySelector('table')?.innerText || ''), '고르기시험성도', '비출석으로 거르면 보임');
+        await hub.del(`/api/ws/sample/members/${m.id}`);
+        noErrors('성도 추가 고르기');
+      }],
       ['재정(예제): 수입을 입력해 장부에 넣으면 목록에 보인다', async () => {
         await go('/finance?ws=sample');
         await clickText('수입·지출 입력');
@@ -436,6 +462,27 @@ export async function runUi() {
         await clickText('닫기', '.dialog .row.end button');
         await hub.put(`${S}/bulletin/style`, { myStyles: [] });
         noErrors('주보 꾸미기');
+      }],
+      ['주보 기본 스타일 14가지(예제): 어느 스타일을 골라도 예제 주보 2단·4면이 종이를 넘치지 않고 화면 오류가 없다', async () => {
+        const wk = await sampleWeek();
+        const S = '/api/ws/sample';
+        const themes = (await hub.get(`${S}/bulletin/style`)).data.themes;
+        eq(themes.length, 14, '스타일 수');
+        const bad = [];
+        const p2 = await browser.newPage();
+        try {
+          for (const t of themes) {
+            const { token } = (await hub.post(`${S}/bulletin/style/preview`, { theme: t.id })).data;
+            for (const fmt of ['print', 'fold4']) {
+              await p2.goto(U(`${S}/weeks/${wk}/bulletin?format=${fmt}&look=${token}`), { waitUntil: 'load' }); await sleep(150);
+              const fit = await p2.evaluate(() => window.__fit || null);
+              if (!fit) bad.push(`${t.name} ${fmt}: 분량을 재지 못함`);
+              else for (const x of fit) if (x.status === 'over') bad.push(`${t.name} ${fmt} ${x.name}: 약 ${x.lines}줄 넘침`);
+            }
+          }
+        } finally { await p2.close(); }
+        eq(bad, [], '넘치는 스타일');
+        noErrors('주보 기본 스타일');
       }],
       ['저장 안 한 입력(예제): 성도 추가 창에 이름을 쓰고 바깥을 누르면 묻고, [취소]하면 창과 입력이 그대로 남는다', async () => {
         await go('/people?ws=sample');

@@ -120,7 +120,7 @@ export function bulletinData({ db, week, order, hide = {}, imgToken = false }) {
     const rows = sv.roles.map((r) => ({ role: r.name, who: (sv.plan[d][r.id] || []).map(who) })).filter((r) => r.who.length);
     return rows.length ? { date: d, rows } : null;
   };
-  const birthdays = Object.values(db.members || {}).filter((m) => (m.status === 'active' || m.status === 'inactive') && /^(\d{4}-)?\d{2}-\d{2}$/.test(m.birth || ''))
+  const birthdays = Object.values(db.members || {}).filter((m) => m.status !== 'moved' && m.status !== 'deceased' && /^(\d{4}-)?\d{2}-\d{2}$/.test(m.birth || ''))
     .map((m) => { const mmdd = m.birth.slice(-5); const y = +date.slice(0, 4);
       // 음력 생일은 그해 양력 날짜로 바꿔서 (음력 설이 양력 1~2월이라 지난해 음력 생일도 본다)
       if (m.lunar) return { name: m.name, date: [y - 1, y, y + 1].map((yy) => lunarToSolar(yy, +mmdd.slice(0, 2), +mmdd.slice(3), !!m.lunarLeap)).find((d) => d && d >= date) || '' };

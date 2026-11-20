@@ -15,3 +15,16 @@ describe('주보', () => {
     expect(() => cleanWeekBlock({ id: 'ann', text: '가'.repeat(WEEK_BLOCK_MAX + 1) })).toThrow(/자까지/);
   });
 });
+
+describe('주보 꾸미기', () => {
+  it('기본 스타일 14가지는 모두 거르기를 그대로 통과한다 (빠지는 설정 없음, 이름 중복 없음)', async () => {
+    const { THEMES, cleanCss } = await import('../server/bulletinStyle.mjs');
+    expect(Object.keys(THEMES).length).toBe(14);
+    const names = Object.values(THEMES).map((t: any) => t.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const [id, t] of Object.entries(THEMES) as [string, any][]) {
+      const r = cleanCss(t.css);
+      expect({ id, dropped: r.dropped, same: r.css.replace(/\s/g, '') === t.css.replace(/\s/g, '') }).toEqual({ id, dropped: 0, same: true });
+    }
+  });
+});
