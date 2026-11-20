@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { api } from './lib/api';
+import { api, ApiError } from './lib/api';
+import Recovery from './pages/Recovery';
 import type { AppInfo, Overview, Ws } from './lib/types';
 import Home from './pages/Home';
 import WeekPage from './pages/WeekPage';
@@ -11,6 +12,7 @@ import Finance from './pages/Finance';
 import Admin from './pages/Admin';
 import { UpdateBell, UpdateDialog, useUpdate, type UpdateView } from './pages/Update';
 import BackupCard from './pages/BackupCard';
+import AiCard from './pages/AiCard';
 import { LockButton, LockGate, LockProvider, LockSettings } from './pages/Lock';
 
 interface Ctx { ws: Ws; setWs: (w: Ws) => void; ov: Overview | null; reload: () => Promise<void>; base: string; loadError: string; upd: UpdateView | null; setUpd: (v: UpdateView) => void; reloadUpd: (force?: boolean) => Promise<UpdateView | null> }
@@ -30,10 +32,14 @@ export default function App() {
   const [ovState, setOv] = useState<(Overview & { ws: Ws }) | null>(null);
   const ov = ovState?.ws === ws ? ovState : null;   // 작업 공간을 바꾸는 순간 이전 자료가 잠깐 보이지 않게
   const [loadError, setLoadError] = useState('');
+  // 실제 교회 자료 파일이 깨졌으면(서버가 503·broken 으로 알림) 복구 화면을 띄운다
+  const [broken, setBroken] = useState(false);
   const base = `/api/ws/${ws}`;
   const reload = useCallback(async () => {
-    try { setOv({ ...(await api<Overview>(base)), ws: base.endsWith('sample') ? 'sample' : 'real' }); setLoadError(''); } catch (e: any) { setLoadError(e.message); }
+    try { setOv({ ...(await api<Overview>(base)), ws: base.endsWith('sample') ? 'sample' : 'real' }); setLoadError(''); setBroken(false); }
+    catch (e: any) { if (e instanceof ApiError && e.status === 503 && e.data?.broken) { setBroken(true); setLoadError(''); } else setLoadError(e.message); }
   }, [base]);
+  const recovered = useCallback(() => { setBroken(false); reload(); }, [reload]);
   useEffect(() => { reload(); }, [reload]);
   const setWs = (w: Ws) => { try { localStorage.setItem('ws', w); } catch { /* 저장 안 돼도 동작 */ } setWsState(w); };
   const update = useUpdate();
@@ -68,7 +74,8 @@ export default function App() {
         </div>
       </header>
       <main>
-        {loadError ? <div className="alert err">{loadError} <button onClick={reload}>다시 시도</button></div>
+        {broken && ws === 'real' ? <Recovery onDone={recovered} />
+          : loadError ? <div className="alert err">{loadError} <button onClick={reload}>다시 시도</button></div>
           : !ov ? <p className="muted">불러오는 중…</p>
           : !ov.church ? (pathname === '/guide' ? <Guide /> : <Setup />)
           : (
@@ -214,6 +221,7 @@ export function Settings() {
       </div>
       {ws === 'real' && <BackupCard />}
       {ws === 'real' && <LockSettings />}
+      <AiCard />
       <UpdateSettings />
       <Support />
       {ws === 'sample' && (

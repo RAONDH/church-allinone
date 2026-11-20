@@ -5,7 +5,7 @@ import { toIcs, parseIcs } from './ical.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { sttStatus, installModel, installEngine, transcribe, AUDIO_EXT } from './stt.mjs';
-import { aiStatus, generate, LABELS } from './ai.mjs';
+import { aiStatus, generate, LABELS, PROVIDERS } from './ai.mjs';
 import { minutesPrompt, parseMinutesJson, SAMPLE_TRANSCRIPT, sampleMinutes } from './minutes-ai.mjs';
 
 // 회의록 녹취·정리 작업 (뒤에서 돌고 화면이 상태를 다시 묻는다)
@@ -331,8 +331,8 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
     const wantAi = what === 'summarize' || b.auto;
     if (!sample && wantAi) {
       const st = await aiStatus(true);
-      provider = (b.provider === 'claude' || b.provider === 'codex') && st[b.provider].loggedIn ? b.provider : st.provider;
-      if (!provider && what === 'summarize') throw new HttpError(400, '이 컴퓨터에 로그인된 AI 구독이 없습니다. Claude Code(claude) 또는 Codex(codex login)에 로그인해 주세요.');
+      provider = PROVIDERS.includes(b.provider) && st[b.provider]?.loggedIn ? b.provider : st.provider;
+      if (!provider && what === 'summarize') throw new HttpError(400, '연결된 AI가 없습니다. Claude Code(claude)·Codex(codex login)에 로그인하거나, 설정 > AI 연결에서 제미나이 API 키를 넣어 주세요.');
     }
     if (what === 'transcribe' && !sample) {
       const st = sttStatus();

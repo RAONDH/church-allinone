@@ -8,8 +8,8 @@ interface BackupView {
   places: { dir: string; label: string }[];
   local: { file: string; size: number; at: number }[];
 }
-const kb = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1e3))}KB`);
-const label = (f: string) => {
+export const kb = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1e3))}KB`);
+export const label = (f: string) => {
   const m = f.match(/^real-(\d{4})-(\d{2})-(\d{2})\.json$/);
   if (m) return `${+m[2]}월 ${+m[3]}일 자동 백업`;
   if (f.startsWith('before-restore-')) return '되살리기 직전 자료';

@@ -5,11 +5,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useApp } from '../App';
 import { api } from '../lib/api';
 import type { Week } from '../lib/types';
+import { UNSAVED_MSG, useGuardedClose } from '../lib/guard';
+import { shrinkImage } from '../lib/image';
 
 export interface LayoutItem { id: string; on: boolean; col: 'L' | 'R'; face: 2 | 3 | 4; size: 'n' | 's' }
-interface Block { id: string; title: string; locked: boolean; auto: string; text: string | null; size: 'n' | 's' }
+interface Block { id: string; title: string; locked: boolean; auto: string; text: string | null; size: 'n' | 's'; img?: string | null }
 interface Settings { layout: LayoutItem[]; [k: string]: any }
 type Fmt = 'print' | 'fold4';
+/** 주보 화면이 재서 알려 주는 단·면마다의 분량 (server/bulletin.mjs 의 fitScript) */
+export interface FitPart { name: string; key: string; pct: number | null; status: 'ok' | 'near' | 'over'; lines: number; cut: string[] }
 
 export default function BulletinEditor({ week, onClose }: { week: Week; onClose: () => void }) {
   const { base } = useApp();
@@ -26,6 +30,56 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
   const load = useCallback(() => api<{ settings: Settings; blocks: Block[] }>(path).then(show).catch((e) => setErr(e.message)), [path]);
   useEffect(() => { load(); }, [load]);
 
+  // 저장하지 않은 글: 이 컴퓨터에 임시로 두었다가, 창을 다시 열면 되살린다
+  const draftKey = `bulletin-draft:${base}:${week.id}`;
+  const dirtyNow = () => { if (!editing) return false; const b = blocks.find((x) => x.id === editing); return !!b && draft !== (b.text ?? b.auto); };
+  const keepDraft = (id: string, text: string) => { try { localStorage.setItem(draftKey, JSON.stringify({ id, text })); } catch { /* 무시 */ } };
+  const dropDraft = () => { try { localStorage.removeItem(draftKey); } catch { /* 무시 */ } };
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !blocks.length) return;
+    restored.current = true;
+    let d: { id: string; text: string } | null = null;
+    try { d = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { /* 무시 */ }
+    const b = d && blocks.find((x) => x.id === d!.id && !x.locked);
+    if (d && b && d.text !== (b.text ?? b.auto)) { setEditing(b.id); setDraft(d.text); setMsg(`저장하지 않았던 ‘${b.title}’ 입력을 되살렸습니다. [이번 주에 저장]을 눌러야 주보에 들어갑니다.`); }
+    else dropDraft();
+  }, [blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+  const g = useGuardedClose(() => { dropDraft(); onClose(); }, dirtyNow);
+  const openEdit = (b: Block) => {
+    if (dirtyNow() && !window.confirm(UNSAVED_MSG)) return;
+    if (editing === b.id) { setEditing(null); dropDraft(); return; }
+    setEditing(b.id); setDraft(b.text ?? b.auto); dropDraft();
+  };
+  const typeDraft = (id: string, text: string) => { setDraft(text); keepDraft(id, text); };
+
+  // 분량: 미리보기 주보가 재서 알려 준다. 고치던 글(저장 전)이 있으면 그 글로 미리보기를 다시 그린다
+  const [fit, setFit] = useState<FitPart[] | null>(null);
+  const [tok, setTok] = useState('');
+  const dirty = dirtyNow();
+  useEffect(() => {
+    if (!editing || !dirty || draft.length > MAX) { setTok(''); return; }
+    const b = blocks.find((x) => x.id === editing);
+    const t = setTimeout(() => {
+      api<{ token: string }>(`${base}/weeks/${week.id}/bulletin/preview`, { method: 'POST', body: { id: editing, text: draft, size: b?.size, img: b?.img } })
+        .then((r) => setTok(r.token)).catch(() => setTok(''));
+    }, 600);
+    return () => clearTimeout(t);
+  }, [editing, draft, dirty, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setFit(null); }, [fmt]);
+
+  // 사진·포스터 칸: 크기를 줄여 올리고 이번 주 주보에 넣는다 (설명 글은 아래 글 칸)
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const upPhoto = async (file: File) => {
+    setPhotoBusy(true); setErr(''); setMsg('');
+    try {
+      const data = await shrinkImage(file, { maxSide: 1400, maxBytes: 600 * 1024 });
+      const r = await api<{ id: string }>(`${base}/bulletin/images`, { method: 'POST', body: { data } });
+      if (await saveBlock('photo', { img: r.id })) setMsg('사진을 이번 주 주보에 넣었습니다. 자리와 순서는 왼쪽 목록에서 바꿀 수 있습니다.');
+    } catch (e: any) { setErr(e.message); }
+    setPhotoBusy(false);
+  };
+
   const saveLayout = async (layout: LayoutItem[]) => {
     if (!s) return;
     setErr(''); setMsg('');
@@ -33,28 +87,29 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
     try { await api(`${base}/bulletin`, { method: 'PUT', body: { ...s, ...flags, layout } }); await load(); setMsg('배치를 저장했습니다. 다음 주에도 이 배치를 씁니다.'); }
     catch (e: any) { setErr(e.message); }
   };
-  const saveBlock = async (id: string, body: { text?: string | null; size?: 'n' | 's' }) => {
+  const saveBlock = async (id: string, body: { text?: string | null; size?: 'n' | 's'; img?: string | null }) => {
     setErr(''); setMsg('');
     const b = blocks.find((x) => x.id === id)!;
-    const next = { id, text: body.text !== undefined ? body.text : b.text, size: body.size || b.size };
+    const next = { id, text: body.text !== undefined ? body.text : b.text, size: body.size || b.size, img: body.img !== undefined ? body.img : b.img };
     try { show(await api(path, { method: 'PUT', body: next })); setMsg(next.text === null && body.text === null ? `‘${b.title}’을 자동 내용으로 되돌렸습니다.` : `‘${b.title}’을 이 예배 주보에 저장했습니다.`); return true; }
     catch (e: any) { setErr(e.message); return false; }
   };
 
-  if (!s) return <Dialog onClose={onClose}><p className="muted">{err || '불러오는 중…'}</p></Dialog>;
+  if (!s) return <Dialog onClose={g.close}><p className="muted">{err || '불러오는 중…'}</p></Dialog>;
   const layout = s.layout;
+  const cutIds = new Set((fit || []).flatMap((p) => p.cut));
   const move = (i: number, d: -1 | 1) => { const j = i + d; if (j < 0 || j >= layout.length) return; const n = [...layout]; [n[i], n[j]] = [n[j], n[i]]; saveLayout(n); };
   const patch = (id: string, p: Partial<LayoutItem>) => saveLayout(layout.map((x) => (x.id === id ? { ...x, ...p } : x)));
 
   return (
-    <Dialog onClose={onClose}>
+    <Dialog onClose={g.close}>
       <div className="row wrap" style={{ alignItems: 'center' }}>
         <h2 className="grow" style={{ margin: 0 }}>주보 편집 · {week.date}</h2>
         <div className="ws-toggle" role="group" aria-label="주보 모양">
           <button className={fmt === 'print' ? 'on' : ''} onClick={() => setFmt('print')}>2단 인쇄용</button>
           <button className={fmt === 'fold4' ? 'on' : ''} onClick={() => setFmt('fold4')}>접는 4면</button>
         </div>
-        <button onClick={onClose}>닫기</button>
+        <button onClick={g.close}>닫기</button>
       </div>
       <p className="muted small">칸의 <b>순서·켜기/끄기·자리</b>는 교회 주보 배치로 저장되어 매주 그대로 씁니다. <b>글 고치기</b>와 <b>글자 작게</b>는 이 예배 주보에만 저장되고, 예배 순서·광고·봉사표 같은 원래 자료는 바뀌지 않습니다. 표지(교회 이름·날짜)는 늘 맨 위{fmt === 'fold4' ? '(1면)' : ''}에 있습니다.</p>
       {err && <p className="alert err small">{err}</p>}
@@ -69,23 +124,34 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
               <li key={it.id} className={it.on ? '' : 'off'}>
                 <div className="row wrap" style={{ alignItems: 'center', gap: 6 }}>
                   <label className="check grow"><input type="checkbox" checked={it.on} onChange={(e) => patch(it.id, { on: e.target.checked })} /><b>{b.title}</b>
-                    {changed && <span className="pill todo">이번 주 고침</span>}{b.size === 's' && <span className="pill info">작게</span>}{b.locked && <span className="pill">🔒 잠김</span>}</label>
+                    {changed && <span className="pill todo">이번 주 고침</span>}{b.size === 's' && <span className="pill info">작게</span>}{b.locked && <span className="pill">🔒 잠김</span>}{it.on && cutIds.has(it.id) && <span className="pill warn">잘림</span>}</label>
                   <button className="small" title="위로" aria-label={`${b.title} 위로`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
                   <button className="small" title="아래로" aria-label={`${b.title} 아래로`} disabled={i === layout.length - 1} onClick={() => move(i, 1)}>↓</button>
                   {fmt === 'print'
                     ? <select aria-label={`${b.title} 자리`} value={it.col} onChange={(e) => patch(it.id, { col: e.target.value as 'L' | 'R' })}><option value="L">왼쪽</option><option value="R">오른쪽</option></select>
                     : <select aria-label={`${b.title} 면`} value={it.face} onChange={(e) => patch(it.id, { face: +e.target.value as 2 | 3 | 4 })}><option value={2}>2면</option><option value={3}>3면</option><option value={4}>4면(뒷면)</option></select>}
-                  <button className="small" disabled={b.locked} onClick={() => { setEditing(editing === it.id ? null : it.id); setDraft(b.text ?? b.auto); }}>글 고치기</button>
+                  <button className="small" disabled={b.locked} onClick={() => openEdit(b)}>{it.id === 'photo' ? '사진 넣기' : '글 고치기'}</button>
                 </div>
                 {editing === it.id && (
                   <div className="bul-text">
-                    <textarea rows={Math.min(12, Math.max(3, (draft.match(/\n/g)?.length || 0) + 2))} value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`${b.title} 이번 주 글`} />
-                    <p className="muted small">{['order', 'ann', 'events', 'sermon', 'info'].includes(it.id) ? '한 줄에 한 항목입니다. ' : ''}비워 두고 저장하면 이번 주에는 이 칸을 넣지 않습니다.</p>
+                    {it.id === 'photo' && (
+                      <div className="bul-photo">
+                        {b.img ? <img src={`${base}/bulletin/images/${b.img}`} alt="이번 주 사진" /> : <p className="muted small">교회 행사 사진이나 포스터를 한 장 넣을 수 있습니다. 크기를 줄여 저장합니다.</p>}
+                        <div className="row wrap">
+                          <label className="btn small">{photoBusy ? '줄이는 중…' : b.img ? '사진 바꾸기' : '사진 고르기'}<input type="file" hidden accept="image/*" aria-label="주보 사진 파일" disabled={photoBusy} onChange={(e) => { const x = e.target.files?.[0]; if (x) upPhoto(x); e.target.value = ''; }} /></label>
+                          {b.img && <button className="small" onClick={async () => { if (await saveBlock('photo', { img: null })) setMsg('사진을 뺐습니다.'); }}>사진 빼기</button>}
+                        </div>
+                        <p className="muted small">아래는 사진 설명입니다 (비워도 됩니다).</p>
+                      </div>
+                    )}
+                    <textarea rows={Math.min(12, Math.max(3, (draft.match(/\n/g)?.length || 0) + 2))} value={draft} onChange={(e) => typeDraft(it.id, e.target.value)} aria-label={it.id === 'photo' ? '사진 설명' : `${b.title} 이번 주 글`} />
+                    <p className="muted small">{['order', 'ann', 'events', 'sermon', 'info'].includes(it.id) ? '한 줄에 한 항목입니다. ' : ''}{it.id === 'photo' ? '' : '비워 두고 저장하면 이번 주에는 이 칸을 넣지 않습니다.'}
+                      <span className={draft.length > MAX ? 'warn-text' : ''}> · {draft.length.toLocaleString()} / {MAX.toLocaleString()}자{draft.length > MAX ? ' (너무 깁니다)' : ''}</span></p>
                     <div className="row wrap">
                       <label className="check"><input type="checkbox" checked={b.size === 's'} onChange={(e) => saveBlock(it.id, { size: e.target.checked ? 's' : 'n' })} />이번 주 글자 작게</label>
                       <span className="grow" />
-                      {changed && <button onClick={async () => { if (await saveBlock(it.id, { text: null })) setDraft(b.auto); }}>자동 내용으로 되돌리기</button>}
-                      <button className="primary" onClick={async () => { if (await saveBlock(it.id, { text: draft })) setEditing(null); }}>이번 주에 저장</button>
+                      {changed && <button onClick={async () => { if (await saveBlock(it.id, { text: null })) { setDraft(b.auto); dropDraft(); } }}>자동 내용으로 되돌리기</button>}
+                      <button className="primary" disabled={draft.length > MAX} onClick={async () => { if (await saveBlock(it.id, { text: draft })) { setEditing(null); dropDraft(); } }}>이번 주에 저장</button>
                     </div>
                   </div>
                 )}
@@ -93,11 +159,15 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
             );
           })}
         </ol>
-        <Preview src={`${base}/weeks/${week.id}/bulletin?format=${fmt}&v=${tick}`} />
+        <div className="bul-right">
+          <FitBar fit={fit} fmt={fmt} draft={!!tok} />
+          <Preview src={`${base}/weeks/${week.id}/bulletin?format=${fmt}&v=${tick}${tok ? `&preview=${tok}` : ''}`} onFit={setFit} />
+        </div>
       </div>
     </Dialog>
   );
 }
+const MAX = 10000;   // server/bulletin.mjs 의 WEEK_BLOCK_MAX 와 같게
 const on = (l: LayoutItem[], id: string) => !!l.find((x) => x.id === id)?.on;
 
 function Dialog({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
@@ -108,9 +178,41 @@ function Dialog({ children, onClose }: { children: React.ReactNode; onClose: () 
   );
 }
 
-// A4 가로 주보(약 1100px 폭)를 칸 폭에 맞게 줄여 보여 준다
-function Preview({ src }: { src: string }) {
+// 단·면마다 얼마나 찼는지: 여유 있음 / 거의 참 / 넘침(약 몇 줄, 어느 칸이 잘리는지)
+function FitBar({ fit, fmt, draft }: { fit: FitPart[] | null; fmt: Fmt; draft: boolean }) {
+  if (!fit) return <p className="muted small bul-fit">분량을 재는 중…</p>;
+  const title = (id: string) => TITLES[id] || id;
+  const over = fit.filter((p) => p.status === 'over');
+  return (
+    <div className="bul-fit" role="status" aria-label="주보 분량">
+      {draft && <p className="small" style={{ color: "var(--info)", margin: "0 0 4px" }}>저장하지 않은 글로 그린 미리보기입니다. [이번 주에 저장]을 눌러야 주보에 들어갑니다.</p>}
+      <ul>
+        {fit.map((p) => (
+          <li key={p.key} className={`fit-${p.status}`}>
+            <b>{p.name}</b>
+            {p.pct !== null && <span className="fit-meter" aria-hidden><span style={{ width: `${Math.min(100, p.pct)}%` }} /></span>}
+            <span>{p.status === 'over' ? `넘침 · 약 ${p.lines}줄${p.cut.length ? ` (‘${p.cut.map(title).join('’·‘')}’ 잘림)` : ''}` : p.status === 'near' ? `거의 참${p.pct !== null ? ` · ${p.pct}%` : ''}` : `여유 있음${p.pct !== null ? ` · ${p.pct}%` : ''}`}</span>
+          </li>
+        ))}
+      </ul>
+      {over.length > 0 && <p className="small warn-text">줄이는 방법: 잘리는 칸을 {fmt === 'print' ? '덜 찬 단' : '덜 찬 면'}으로 옮기기 · 글 줄이기 · ‘이번 주 글자 작게’. 글자를 더 작게는 하지 않습니다(읽기 어려워짐).</p>}
+    </div>
+  );
+}
+const TITLES: Record<string, string> = { order: '예배 순서', sermon: '오늘의 말씀', summary: '설교 요약', ann: '교회 소식', photo: '사진·포스터', serve: '섬기는 분들', events: '다음 주 일정', births: '생일을 축하합니다', info: '교회 안내' };
+
+// A4 가로 주보(약 1100px 폭)를 칸 폭에 맞게 줄여 보여 준다. 주보가 잰 분량은 onFit 으로 받는다
+export function Preview({ src, onFit }: { src: string; onFit: (f: FitPart[]) => void }) {
   const box = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const on = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || e.source !== frame.current?.contentWindow || e.data?.type !== 'bulletin-fit') return;
+      onFit(e.data.parts);
+    };
+    window.addEventListener('message', on);
+    return () => window.removeEventListener('message', on);
+  }, [onFit]);
   const [k, setK] = useState(0.5);
   useLayoutEffect(() => {
     const el = box.current; if (!el) return;
@@ -121,7 +223,7 @@ function Preview({ src }: { src: string }) {
   }, []);
   return (
     <div className="bul-preview" ref={box} style={{ height: 1700 * k }}>
-      <iframe title="주보 미리보기" src={src} style={{ width: 1120, height: 1700, transform: `scale(${k})` }} />
+      <iframe ref={frame} title="주보 미리보기" src={src} style={{ width: 1120, height: 1700, transform: `scale(${k})` }} />
     </div>
   );
 }

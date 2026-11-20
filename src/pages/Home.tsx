@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { SyncResult, Week, WeekStatus } from '../lib/types';
 import { CareCard } from './People';
@@ -25,6 +26,7 @@ export function StepList({ steps, onGo }: { steps: Step[]; onGo?: (s: Step) => v
 }
 
 export function CreateWeekDialog({ from, defaultDate, onClose }: { from: Week | null; defaultDate: string; onClose: () => void }) {
+  const g = useGuardedClose(onClose);
   const { base, ov, reload } = useApp();
   const nav = useNavigate();
   const [date, setDate] = useState(defaultDate);
@@ -43,8 +45,8 @@ export function CreateWeekDialog({ from, defaultDate, onClose }: { from: Week | 
     } catch (e: any) { setErr(e.message); setBusy(false); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{from ? '지난 예배 복사해서 시작' : '이번 주 예배 만들기'}</h2>
         {from && <p className="muted">복사할 예배: {fmtDate(from.date)} {from.name}{from.sermonTitle ? ` · ${from.sermonTitle}` : ''}</p>}
         <div className="row">
@@ -65,7 +67,7 @@ export function CreateWeekDialog({ from, defaultDate, onClose }: { from: Week | 
         <p className="muted small">예배송출에서는 새 예배가 ‘지금 예배’로 선택됩니다. 지난 예배 순서는 그대로 남습니다.</p>
         {err && <p className="alert err">{err}</p>}
         <div className="row end">
-          <button onClick={onClose}>취소</button>
+          <button onClick={g.close}>취소</button>
           <button className="primary" disabled={busy || !date} onClick={go}>{busy ? '만드는 중…' : '만들기'}</button>
         </div>
       </div>

@@ -9,7 +9,7 @@ interface Doc { at: number; via: string; sample: boolean; chars: number; basis: 
 interface Job { startedAt: number; provider: string; label: string; waiting?: boolean }
 interface SubState { installed: boolean; loggedIn: boolean }
 interface AfterState {
-  ai: { provider: string | null; label: string; claude?: SubState; codex?: SubState };
+  ai: { provider: string | null; label: string; claude?: SubState; codex?: SubState; gemini?: SubState };
   docs: Partial<Record<Kind, Doc>>; running: Partial<Record<Kind, Job>>; errors: Partial<Record<Kind, { at: number; message: string }>>;
   notesChars: number; minNotes: number;
 }
@@ -72,7 +72,7 @@ export default function AfterTab({ week, onGoInfo }: { week: Week; onGoInfo: () 
   const sample = st.ai.provider === 'sample';
   const enough = st.notesChars >= st.minNotes;
   const ready = enough && (sample || !!st.ai.provider);
-  const subs = (['claude', 'codex'] as const).filter((p) => st.ai[p]?.loggedIn);
+  const subs = (['claude', 'codex', 'gemini'] as const).filter((p) => st.ai[p]?.loggedIn);
   const made = ITEMS.filter((it) => st.docs[it.kind]).length;
   const left = ITEMS.filter((it) => !st.docs[it.kind] && !st.running[it.kind] && it.kind !== 'review').map((it) => it.kind);
 
@@ -90,7 +90,7 @@ export default function AfterTab({ week, onGoInfo }: { week: Week; onGoInfo: () 
               : <span className="pill warn">AI 연결 안 됨</span>}
             {!sample && subs.length > 1 && (
               <select value={provider || st.ai.provider || ''} onChange={(e) => setProvider(e.target.value)} aria-label="사용할 AI">
-                {subs.map((p) => <option key={p} value={p}>{p === 'claude' ? 'Claude 구독' : 'ChatGPT 구독'}</option>)}
+                {subs.map((p) => <option key={p} value={p}>{AI_NAME[p]}</option>)}
               </select>
             )}
             {ready && left.length > 0 && <button className="primary" onClick={() => makeAll(left)}>남은 {left.length}가지 한꺼번에 만들기</button>}
@@ -98,7 +98,7 @@ export default function AfterTab({ week, onGoInfo }: { week: Week; onGoInfo: () 
         </div>
         {!sample && !st.ai.provider && (
           <div className="alert warn">
-            이 컴퓨터에 로그인된 AI 구독이 없습니다. 터미널(윈도우는 PowerShell)에서 <code>claude</code>(Claude 구독) 또는 <code>codex login</code>(ChatGPT 구독)으로 로그인한 뒤
+            연결된 AI가 없습니다. 터미널(윈도우는 PowerShell)에서 <code>claude</code>(Claude 구독) 또는 <code>codex login</code>(ChatGPT 구독)으로 로그인하거나, <a href="/settings#ai-connect">설정 &gt; AI 연결</a>에서 제미나이 API 키를 넣은 뒤
             <button className="link" onClick={() => load(true)}>다시 확인</button>을 눌러 주세요.
           </div>
         )}
@@ -109,7 +109,7 @@ export default function AfterTab({ week, onGoInfo }: { week: Week; onGoInfo: () 
           </div>
         )}
         {err && <p className="alert err">{err}</p>}
-        {!sample && st.ai.provider && <p className="muted small">하나에 2~5분, 구독 사용량을 씁니다(추가 요금 없음). 한꺼번에 누르면 두 개씩 차례로 만들고(설교 점검은 빼고), 그동안 다른 화면으로 가도 됩니다.</p>}
+        {!sample && st.ai.provider && <p className="muted small">하나에 2~5분, {(provider || st.ai.provider) === 'gemini' ? '제미나이 API 무료 사용량을 씁니다(한도를 넘으면 잠시 뒤 다시).' : '구독 사용량을 씁니다(추가 요금 없음).'} 한꺼번에 누르면 두 개씩 차례로 만들고(설교 점검은 빼고), 그동안 다른 화면으로 가도 됩니다.</p>}
       </div>
 
       {GROUPS.map((g) => (
@@ -230,3 +230,4 @@ function renderMd(md: string) {
   flush();
   return out;
 }
+const AI_NAME = { claude: 'Claude 구독', codex: 'ChatGPT 구독', gemini: '제미나이 API 키' } as const;

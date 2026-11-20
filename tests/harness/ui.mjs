@@ -54,7 +54,9 @@ export async function runUi() {
   let errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e.message || e)));
-  page.on('dialog', (d) => d.accept());
+  // 확인 창: 보통은 [확인]. 점검에서 dialogPlan 에 false 를 넣으면 그다음 확인 창은 [취소]를 누른다
+  const dialogPlan = [], dialogsSeen = [];
+  page.on('dialog', (d) => { dialogsSeen.push(d.message()); (dialogPlan.length ? dialogPlan.shift() : true) ? d.accept(d.type() === 'prompt' ? d.defaultValue() : undefined) : d.dismiss(); });   // 입력 창은 처음 값 그대로 [확인]
   const U = (p) => `${hub.base}${p}`;
   const go = async (p) => { await page.goto(U(p), { waitUntil: 'networkidle0' }); };
   const waitText = (t, timeout = 10000) => page.waitForFunction((x) => document.body.innerText.includes(x), { timeout }, t).catch(() => { throw new Error(`화면에 "${t}" 이(가) 나오지 않았습니다`); });
@@ -114,6 +116,36 @@ export async function runUi() {
         eq((await hub.get(`/api/ws/real/weeks/${id}`)).data.week.sermonTitle, '화면 점검 설교', '서버에 저장된 제목');
         errors = errors.filter((e) => !/Failed to load resource/.test(e));
         noErrors('예배 정보');
+      }],
+      ['두 창 충돌: 두 창에서 다른 칸을 고치면 둘 다 남고, 같은 칸을 고치면 덮어쓰지 않고 알려 준 뒤 [다른 창 내용 받기]로 맞춘다', async () => {
+        const id = page.url().split('/week/')[1].split('/')[0];
+        const typeIn = async (pg, label, value) => {
+          const h = await pg.evaluateHandle((t) => [...document.querySelectorAll('label')].find((l) => l.innerText.trim().startsWith(t))?.querySelector('input, textarea'), label);
+          const el = h.asElement(); if (!el) throw new Error(`"${label}" 칸을 찾지 못했습니다`);
+          await el.click({ clickCount: 3 }); await el.type(value);
+        };
+        const saved = (pg, who) => pg.waitForFunction(() => /✓ 저장됨/.test(document.body.innerText), { timeout: 15000, polling: 200 })
+          .catch(async () => { throw new Error(`${who}: "저장됨"이 되지 않았습니다 — ${await pg.evaluate(() => (document.querySelector('.save')?.innerText || '') + ' | ' + [...document.querySelectorAll('.alert')].map((x) => x.innerText).join(' / ')).catch((e) => e.message)}`); });
+        const b = await browser.newPage();
+        try {
+          await b.setViewport({ width: 1280, height: 900 });
+          await b.goto(U(`/week/${id}/info`), { waitUntil: 'networkidle0' });
+          // 1) 첫 창이 본문을 바꾼 것을 모르는 둘째 창이 기도자를 고쳐도, 본문은 되돌아가지 않는다
+          await page.bringToFront(); await typeIn(page, '성경 본문', '첫 창 본문'); await sleep(200); await saved(page, '첫 창(본문)');
+          await b.bringToFront(); await typeIn(b, '대표 기도', '둘째 창 기도자'); await sleep(200); await saved(b, '둘째 창(기도자)');
+          const w = (await hub.get(`/api/ws/real/weeks/${id}`)).data.week;
+          eq([w.passage, w.prayerLeader], ['첫 창 본문', '둘째 창 기도자'], '두 창에서 고친 칸이 모두 남음');
+          // 2) 둘째 창이 모르는 사이 첫 창이 제목을 바꾸고, 둘째 창도 제목을 고치면 덮어쓰지 않고 알려 준다
+          await page.bringToFront(); await typeIn(page, '설교 제목', '첫 창 제목'); await sleep(200); await saved(page, '첫 창(제목)');
+          await b.bringToFront(); await typeIn(b, '설교 제목', '둘째 창 제목');
+          await b.waitForFunction(() => /다른 창에서 ‘설교 제목’을\(를\) 먼저 바꿨습니다/.test(document.body.innerText), { timeout: 15000, polling: 200 }).catch(() => { throw new Error('충돌 안내가 나오지 않았습니다'); });
+          eq((await hub.get(`/api/ws/real/weeks/${id}`)).data.week.sermonTitle, '첫 창 제목', '충돌하면 덮어쓰지 않음');
+          await b.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.innerText.trim() === '다른 창 내용 받기')?.click());
+          await saved(b, '둘째 창(받은 뒤)');
+          eq(await b.evaluate(() => [...document.querySelectorAll('label')].find((l) => l.innerText.trim().startsWith('설교 제목'))?.querySelector('input')?.value), '첫 창 제목', '받은 뒤 둘째 창의 설교 제목');
+        } finally { await b.close(); await page.bringToFront(); }
+        errors = errors.filter((e) => !/Failed to load resource/.test(e));
+        noErrors('두 창 충돌');
       }],
       ['원고 파일 가져오기: 워드(.docx)를 넣으면 원고 칸에 글이 들어간다', async () => {
         const f = path.join(files, '원고.docx');
@@ -316,6 +348,215 @@ export async function runUi() {
         await clickText('닫기', '.dialog button');
         noErrors('주보 편집');
       }],
+      ['주보 넘침(예제): 광고가 많아 2단 주보가 A4 한 장을 넘으면 어느 단이 넘치는지 경고하고, 줄이면 경고가 사라진다', async () => {
+        const wk = await sampleWeek();
+        const B = `/api/ws/sample/weeks/${wk}/bulletin`;
+        const warnOf = async (fmt) => {
+          const p2 = await browser.newPage();
+          await p2.goto(U(`${B}?format=${fmt}`), { waitUntil: 'load' }); await sleep(300);
+          const t = await p2.evaluate(() => [...document.querySelectorAll('.how.warn')].map((x) => x.innerText).join(' '));
+          await p2.close(); return t;
+        };
+        await hub.put(`${B}/blocks`, { id: 'ann', text: Array.from({ length: 70 }, (_, i) => `넘침 시험 광고 ${i + 1}번째 줄입니다`).join('\n') });
+        try {
+          const pw = await warnOf('print');
+          has(pw, '오른쪽 단이 약', '2단: 넘치는 단과 대략 몇 줄인지 알려 줌');
+          has(pw, '‘교회 소식’', '2단: 어느 칸이 잘리는지 알려 줌');
+          has(await warnOf('fold4'), '3면이 약', '4면: 넘치는 면을 알려 줌');
+        } finally { await hub.put(`${B}/blocks`, { id: 'ann', text: null }); }
+        eq(await warnOf('print'), '', '줄이면 2단 경고 없음');
+        noErrors('주보 넘침');
+      }],
+      ['주보 자동 채우기(예제): 내용이 적은 단은 줄간격을 넓혀 종이 아래까지 채우고(넘치지 않음), 고정 정보에서 끄면 원래 간격 그대로', async () => {
+        const wk = await sampleWeek();
+        const B = `/api/ws/sample/weeks/${wk}/bulletin`;
+        const settings = (await hub.get('/api/ws/sample/bulletin')).data;
+        eq(settings.autoFill, true, '처음에는 자동 채우기 켜짐');
+        const look = async () => {
+          const p2 = await browser.newPage();
+          await p2.goto(U(`${B}?format=print`), { waitUntil: 'load' }); await sleep(300);
+          const r = await p2.evaluate(() => {
+            const m = document.createElement('div'); m.style.height = '192mm'; document.body.appendChild(m); const room = m.getBoundingClientRect().height; m.remove();
+            return [...document.querySelectorAll('.sheet>div')].map((c) => { const top = c.getBoundingClientRect().top; const used = Math.max(...[...c.children].map((x) => x.getBoundingClientRect().bottom - top)); return { fill: c.dataset.fill ?? null, lh: getComputedStyle(c).lineHeight, used: Math.round(used), room: Math.round(room) }; });
+          });
+          const warn = await p2.evaluate(() => document.querySelector('.how.warn')?.innerText || '');
+          await p2.close(); return { cols: r, warn };
+        };
+        try {
+          const a = await look();
+          const left = a.cols[0];
+          ok(+left.fill > 0, '왼쪽 단 줄간격을 넓힘', left);
+          ok(left.used >= left.room - 40 && left.used <= left.room, '왼쪽 단이 종이 아래 가까이까지 차고 넘치지 않음', left);
+          eq(a.warn, '', '자동으로 채워도 넘침 경고 없음');
+          await hub.put('/api/ws/sample/bulletin', { ...settings, autoFill: false });
+          const b = await look();
+          eq(b.cols.map((c) => c.fill), [null, null], '끄면 줄간격을 넓히지 않음');
+          ok(b.cols[0].used < left.used, '끄면 원래 간격 (덜 참)', [b.cols[0], left]);
+        } finally { await hub.put('/api/ws/sample/bulletin', settings); }
+        noErrors('주보 자동 채우기');
+      }],
+      ['주보 꾸미기(예제): 기본 스타일을 고르면 미리보기가 바뀌고 [적용]하면 주보에 들어가며, AI로 만든 스타일은 내 스타일로 저장하고 기본으로 되돌릴 수 있다', async () => {
+        const wk = await sampleWeek();
+        const S = '/api/ws/sample';
+        const look = async (want, timeout = 8000) => {   // 미리보기 틀의 교회 이름 글꼴·강조색
+          const end = Date.now() + timeout; let v = null;
+          while (Date.now() < end) {
+            const f = page.frames().find((x) => x.url().includes('look='));
+            v = f ? await f.evaluate(() => { const c = document.querySelector('.church'); return c ? { font: getComputedStyle(c).fontFamily, a: getComputedStyle(document.documentElement).getPropertyValue('--a').trim(), url: location.href } : null; }).catch(() => null) : null;
+            if (v && want(v)) return v;
+            await sleep(200);
+          }
+          throw new Error(`꾸밈 미리보기가 기대대로 바뀌지 않았습니다: ${JSON.stringify(v)}`);
+        };
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await clickText('주보 꾸미기');
+        await waitText('겉모양');
+        await look((v) => v.a === '#2f5d50');
+        await clickText('고전적인', '.style-picks button');
+        await look((v) => v.font.includes('Myeongjo') && v.a === '#1f3a5f');
+        eq((await hub.get(`${S}/bulletin/style`)).data.theme, 'basic', '고르기만 하면 저장하지 않음');
+        await clickText('이 스타일로 적용');
+        await waitText('스타일을 주보에 적용했습니다');
+        eq((await hub.get(`${S}/bulletin/style`)).data.theme, 'classic', '적용하면 저장');
+        has((await hub.get(`${S}/weeks/${wk}/bulletin?format=print`)).data, 'Nanum Myeongjo', '주보에 들어감');
+        const ta = await page.$('textarea[aria-label="원하는 주보 분위기"]');
+        await ta.type('따뜻한 가을 느낌, 갈색');
+        await clickText('AI로 만들기');
+        await waitText('새 스타일');
+        await look((v) => v.a === '#7a4a24');
+        await clickText('내 스타일로 저장');
+        await waitText('저장했습니다. 언제든');
+        const v1 = (await hub.get(`${S}/bulletin/style`)).data;
+        eq([v1.myStyles.length, v1.theme], [1, 'classic'], '내 스타일에 저장 (적용은 따로)');
+        ok(await page.evaluate(() => [...document.querySelectorAll('.style-picks button')].some((b) => b.innerText.includes('예시 · 따뜻한 갈색'))), '내 스타일이 목록에 나옴');
+        await clickText('기본', '.style-picks button');
+        await clickText('이 스타일로 적용');
+        await waitText('스타일을 주보에 적용했습니다');
+        eq((await hub.get(`${S}/bulletin/style`)).data.theme, 'basic', '기본으로 되돌림');
+        await clickText('닫기', '.dialog .row.end button');
+        await hub.put(`${S}/bulletin/style`, { myStyles: [] });
+        noErrors('주보 꾸미기');
+      }],
+      ['저장 안 한 입력(예제): 성도 추가 창에 이름을 쓰고 바깥을 누르면 묻고, [취소]하면 창과 입력이 그대로 남는다', async () => {
+        await go('/people?ws=sample');
+        await clickText('성도 추가');
+        await typeLabel('이름', '닫기시험성도');
+        dialogsSeen.length = 0; dialogPlan.push(false);
+        await page.evaluate(() => document.querySelector('.dialog-back')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+        await sleep(200);
+        ok(dialogsSeen.some((m) => m.includes('저장하지 않은 입력')), '닫기 전에 물어야 함', dialogsSeen);
+        eq(await page.evaluate(() => [...document.querySelectorAll('.dialog label')].find((l) => l.innerText.trim().startsWith('이름'))?.querySelector('input')?.value), '닫기시험성도', '[취소]하면 입력이 남음');
+        await clickText('닫기', '.dialog button');   // 이번에는 [확인] → 닫힘
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        // 아무것도 안 쓰고 닫으면 묻지 않는다
+        await clickText('성도 추가'); dialogsSeen.length = 0;
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        eq(dialogsSeen, [], '입력이 없으면 묻지 않음');
+        noErrors('저장 안 한 입력');
+      }],
+      ['주보 편집 저장 안 한 글(예제): 고치던 글이 있으면 닫기 전에 묻고, 저장 못 한 채 화면을 떠났다 다시 열면 그 글을 되살린다 (일부러 닫으면 버림)', async () => {
+        const wk = await sampleWeek();
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await clickText('주보 편집 (배치·글 고치기)');
+        await waitText('주보 편집 ·');
+        await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('교회 소식'))?.querySelector('button:last-of-type')?.click());
+        const ta = await page.waitForSelector('textarea[aria-label="교회 소식 이번 주 글"]');
+        await ta.click(); await ta.evaluate((x) => x.select()); await page.keyboard.press('Backspace'); await ta.type('저장 안 한 광고 글');
+        dialogsSeen.length = 0; dialogPlan.push(false);
+        await clickText('닫기', '.dialog button');
+        ok(dialogsSeen.some((m) => m.includes('저장하지 않은 입력')), '닫기 전에 물어야 함', dialogsSeen);
+        ok(await page.$('textarea[aria-label="교회 소식 이번 주 글"]'), '[취소]하면 창이 그대로');
+        await go(`/week/${wk}/outputs?ws=sample`);   // 저장하지 않고 화면을 떠남 (탭 닫기·새로 고침과 같음)
+        await clickText('주보 편집 (배치·글 고치기)');
+        await waitText('입력을 되살렸습니다');
+        eq(await page.$eval('textarea[aria-label="교회 소식 이번 주 글"]', (x) => x.value), '저장 안 한 광고 글', '되살린 글');
+        eq((await hub.get(`/api/ws/sample/weeks/${wk}/bulletin/blocks`)).data.blocks.find((b) => b.id === 'ann').text, null, '저장은 하지 않음');
+        await clickText('닫기', '.dialog button');   // [확인] → 버림
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        await clickText('주보 편집 (배치·글 고치기)'); await waitText('주보 편집 ·'); await sleep(300);
+        ok(!(await page.$('textarea[aria-label="교회 소식 이번 주 글"]')), '버리고 닫으면 다음에는 되살리지 않음');
+        await clickText('닫기', '.dialog button');
+        noErrors('주보 편집 저장 안 한 글');
+      }],
+      ['주보 분량(예제): 편집 창에 단·면마다 여유·넘침이 나오고, 저장하지 않은 긴 글도 미리보기에 바로 반영해 넘치는 칸에 ‘잘림’을 붙인다', async () => {
+        const wk = await sampleWeek();
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await clickText('주보 편집 (배치·글 고치기)');
+        await waitText('주보 편집 ·');
+        await page.waitForFunction(() => /왼쪽 단[\s\S]*여유 있음/.test(document.querySelector('.bul-fit')?.innerText || ''), { timeout: 15000 })
+          .catch(async () => { throw new Error(`처음 분량이 나오지 않았습니다: ${await page.evaluate(() => document.querySelector('.bul-fit')?.innerText)}`); });
+        await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('교회 소식'))?.querySelector('button:last-of-type')?.click());
+        const ta = await page.waitForSelector('textarea[aria-label="교회 소식 이번 주 글"]');
+        const long = Array.from({ length: 70 }, (_, i) => `분량 시험 광고 ${i + 1}번째 줄입니다`).join('\n');
+        await ta.evaluate((x, v) => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(x, v); x.dispatchEvent(new Event('input', { bubbles: true })); }, long);
+        await page.waitForFunction(() => { const t = document.querySelector('.bul-fit')?.innerText || ''; return t.includes('저장하지 않은 글로') && /오른쪽 단[\s\S]*넘침 · 약 \d+줄/.test(t); }, { timeout: 15000 })
+          .catch(async () => { throw new Error(`저장 전 글의 넘침이 나오지 않았습니다: ${await page.evaluate(() => document.querySelector('.bul-fit')?.innerText)}`); });
+        has(await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('교회 소식'))?.innerText || ''), '잘림', '넘치는 칸에 잘림 표시');
+        eq((await hub.get(`/api/ws/sample/weeks/${wk}/bulletin/blocks`)).data.blocks.find((b) => b.id === 'ann').text, null, '미리보기만 하고 저장하지 않음');
+        await clickText('닫기', '.dialog button');   // [확인] → 버림
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        noErrors('주보 분량');
+      }],
+      ['제미나이 연결(설정): AI 연결 칸에 API 키를 넣고 저장하면 연결됨으로 바뀌고 입력 칸은 비며, 지우면 다시 연결 안 됨', async () => {
+        await go('/settings?ws=sample');
+        await waitText('AI 연결');
+        const gem = () => page.evaluate(() => [...document.querySelectorAll('.ai-list li')].find((li) => li.innerText.includes('제미나이'))?.innerText || '');
+        has(await gem(), '연결 안 됨', '처음에는 연결 안 됨');
+        const input = await page.$('input[aria-label="제미나이 API 키"]');
+        await input.type('AIzaSy-ui_TEST.0123456789abcdefghij');
+        await clickText('키 저장');
+        await waitText('제미나이 API 키를 저장했습니다');
+        has(await gem(), '연결됨', '저장하면 연결됨');
+        eq(await page.$eval('input[aria-label="제미나이 API 키"]', (x) => x.value), '', '저장한 뒤 키 칸은 비움 (키를 다시 보여 주지 않음)');
+        await clickText('키 지우기');   // 확인 창 [확인]
+        await waitText('제미나이 API 키를 지웠습니다');
+        has(await gem(), '연결 안 됨', '지우면 연결 안 됨');
+        noErrors('제미나이 연결');
+      }],
+      ['주보 확정본(예제): 결과물 탭에서 [주보 확정]을 누르면 1차가 생기고, 표어를 바꾸면 ‘초안에 변경이 있습니다’가 나오며, 다시 확정하면 2차가 된다', async () => {
+        const wk = await sampleWeek();
+        const settings = (await hub.get('/api/ws/sample/bulletin')).data;
+        try {
+          await go(`/week/${wk}/outputs?ws=sample`);
+          await clickText('주보 확정');
+          await waitText('확정본 1차');
+          await waitText('확정한 뒤 바뀐 내용이 없습니다');
+          const href = await page.evaluate(() => [...document.querySelectorAll('.bul-final a')].find((a) => a.innerText === '인쇄용')?.getAttribute('href'));
+          ok(href && href.includes('final=1'), '확정본 인쇄용 링크', href);
+          await hub.put('/api/ws/sample/bulletin', { ...settings, motto: '화면시험 새 표어' });
+          await go(`/week/${wk}/outputs?ws=sample`);
+          await waitText('초안에 변경이 있습니다');
+          await clickText('2차로 다시 확정');   // 확인 창 [확인]
+          await waitText('확정본 2차');
+          await waitText('확정한 뒤 바뀐 내용이 없습니다');
+          noErrors('주보 확정본');
+        } finally { await hub.put('/api/ws/sample/bulletin', settings); }
+      }],
+      ['주보 사진(예제): 주보 편집의 사진·포스터 칸에서 사진 파일을 고르면 크기를 줄여 올리고 미리보기에 나오며, 빼면 사라진다', async () => {
+        const wk = await sampleWeek();
+        const png = path.join(files, '행사사진.png');
+        fs.writeFileSync(png, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'));
+        await go(`/week/${wk}/outputs?ws=sample`);
+        await clickText('주보 편집 (배치·글 고치기)');
+        await waitText('주보 편집 ·');
+        await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('사진·포스터'))?.querySelector('button:last-of-type')?.click());
+        const input = await page.waitForSelector('input[aria-label="주보 사진 파일"]');
+        await input.uploadFile(png);
+        await waitText('사진을 이번 주 주보에 넣었습니다', 15000);
+        const B = `/api/ws/sample/weeks/${wk}/bulletin`;
+        const img = (await hub.get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'photo').img;
+        ok(/^[a-f0-9]{16}$/.test(img || ''), '사진이 저장됨', img);
+        await page.waitForFunction(() => !!document.querySelector('iframe[title="주보 미리보기"]')?.contentDocument?.querySelector('section.photo img'), { timeout: 15000 })
+          .catch(() => { throw new Error('미리보기에 사진이 나오지 않았습니다'); });
+        ok(await page.$('.bul-photo img'), '편집 창에 사진 작게 보임');
+        await clickText('사진 빼기', '.dialog button');
+        await waitText('사진을 뺐습니다');
+        eq((await hub.get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'photo').img, null, '빼면 저장된 사진 없음');
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        noErrors('주보 사진');
+      }],
       ['잠금: 설정에서 켜고 🔒 잠그기를 누르면 성도·재정이 잠금 화면이 되고, 암호를 넣으면 열린다', async () => {
         await go('/settings?ws=real');
         await waitText('잠금 (성도·재정·행정)');
@@ -355,6 +596,31 @@ export async function runUi() {
         const list = await page.evaluate(() => document.querySelector('ol.setlist')?.innerText || '');
         ok(list.indexOf('화면시험 새 노래') >= 0 && list.indexOf('화면시험 새 노래') < list.indexOf('은혜의 강'), '이번 주 찬양에 music sheet 순서대로', list.slice(0, 200));
         noErrors('music sheet 가져오기');
+      }],
+      ['자료 손상 복구: 우리 교회 자료 파일이 깨졌으면 처음 설정 대신 복구 화면이 나오고, 백업을 골라 되살리면 자료가 열린다', async () => {
+        const h2 = await startHub({ name: 'ui-broken', prepare: (d) => {
+          fs.writeFileSync(path.join(d, 'real.json'), '{"church":{"name":"깨');
+          fs.mkdirSync(path.join(d, 'backups'));
+          fs.writeFileSync(path.join(d, 'backups', 'real-2026-01-01.json'), JSON.stringify({ version: 1, church: { name: '복구시험교회', pastor: '' }, weeks: {}, members: {} }));
+        } });
+        const p2 = await browser.newPage();
+        const errs = [];
+        p2.on('pageerror', (e) => errs.push(String(e.message)));
+        p2.on('console', (m) => { if (m.type() === 'error' && !/status of 503/.test(m.text())) errs.push(m.text()); });
+        p2.on('dialog', (d) => d.accept());
+        try {
+          await p2.goto(`${h2.base}/?ws=real`, { waitUntil: 'networkidle0' });
+          await p2.waitForFunction(() => document.body.innerText.includes('자료 파일을 읽지 못했습니다'), { timeout: 10000 }).catch(() => { throw new Error('복구 화면이 나오지 않았습니다'); });
+          const text = await p2.evaluate(() => document.body.innerText);
+          has(text, '복구시험교회', '고를 수 있는 백업과 그 안의 교회 이름');
+          has(text, 'real.json.broken-', '깨진 파일을 보관한 이름');
+          ok(!text.includes('우리 교회로 시작하기'), '처음 설정 화면이 아님', text.slice(0, 200));
+          const clicked = await p2.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.innerText.includes('이 백업으로 되살리기')); b?.click(); return !!b; });
+          ok(clicked, '[이 백업으로 되살리기] 단추');
+          await p2.waitForFunction(() => document.querySelector('.brand small')?.textContent === '복구시험교회' && !document.querySelector('.recovery'), { timeout: 15000 })
+            .catch(async () => { throw new Error(`되살린 뒤 자료가 열리지 않았습니다: ${(await p2.evaluate(() => document.body.innerText)).slice(0, 300)}`); });
+          eq(errs, [], '복구 화면 오류');
+        } finally { await p2.close(); await h2.stop(); }
       }],
       ['모든 화면이 오류 없이 열린다 (위 메뉴 · 예배 탭 · 성도·재정·행정 탭)', async () => {
         const wk = await sampleWeek();

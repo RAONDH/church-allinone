@@ -67,6 +67,15 @@ export function backupPlaces() {
   return out;
 }
 
+const LOCAL_RE = /^(real-\d{4}-\d{2}-\d{2}|before-restore-.+)\.json$/;
+const EXTERNAL_RE = /^real-\d{4}-\d{2}-\d{2}\.json$/;
+/** 백업 파일 하나를 읽어 올인원 자료인지 확인 (깨졌으면 알아듣게 알림) */
+function readBackup(full) {
+  let obj;
+  try { obj = JSON.parse(fs.readFileSync(full, 'utf8').replace(/^\uFEFF/, '')); } catch { throw bad('이 백업 파일도 깨져 있어 읽지 못했습니다. 다른 날짜를 골라 주세요.'); }
+  return checkRestore(obj);
+}
+
 // 저장한 뒤 이만큼 지나면 바깥 백업을 그날 파일에 새로 덮어쓴다 (저장할 때마다 복사하지 않게 모아서)
 const AGAIN_MS = 10 * 60 * 1000;
 
@@ -99,6 +108,7 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
    *  마지막 백업에서 againMs 가 지난 뒤 그날 파일을 새 내용으로 덮어쓴다 (force 면 바로). */
   async function external(force = false) {
     if (!st.dir) return { skipped: 'off' };
+    if (store.broken) return { skipped: 'broken' };   // 깨진 자료 파일을 바깥 백업에 덮어쓰지 않는다
     const day = localDay();
     if (!force && st.lastDay === day && !st.lastError) {
       if (changedAt() <= st.lastAt) return { skipped: 'uptodate' };
@@ -136,12 +146,14 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
     const busy = isBusy();
     if (busy) throw bad(`${busy} 끝난 뒤에 되살려 주세요.`, 409);
     checkRestore(obj);
-    // 되살리기 전 지금 자료를 따로 남겨 둔다 (되살린 것을 되돌릴 수 있게)
+    // 되살리기 전 지금 자료를 따로 남겨 둔다 (되살린 것을 되돌릴 수 있게).
+    // 자료 파일이 깨진 상태면 이미 real.json.broken-… 으로 보관했으니 백업 목록에 깨진 파일을 넣지 않는다
     const keep = path.join(localDir, `before-restore-${localDay()}-${Date.now()}.json`);
     fs.mkdirSync(localDir, { recursive: true });
-    if (fs.existsSync(realFile)) fs.copyFileSync(realFile, keep);
+    const wasBroken = store.broken;
+    if (!wasBroken && fs.existsSync(realFile)) fs.copyFileSync(realFile, keep);
     await store.reset(obj);
-    return { ok: true, why, kept: path.basename(keep), ...counts(store.db) };
+    return { ok: true, why, kept: wasBroken ? wasBroken.kept : path.basename(keep), ...counts(store.db) };
   }
 
   return {
@@ -160,8 +172,33 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
     },
     async restoreLocal(file) {
       const f = path.basename(String(file || ''));
-      if (!/^(real-\d{4}-\d{2}-\d{2}|before-restore-.+)\.json$/.test(f) || !fs.existsSync(path.join(localDir, f))) throw bad('그 백업 파일을 찾을 수 없습니다.', 404);
-      return restoreObj(JSON.parse(fs.readFileSync(path.join(localDir, f), 'utf8')), f);
+      if (!LOCAL_RE.test(f) || !fs.existsSync(path.join(localDir, f))) throw bad('그 백업 파일을 찾을 수 없습니다.', 404);
+      return restoreObj(readBackup(path.join(localDir, f)), f);
+    },
+    /** 자료 파일이 깨졌을 때 고를 수 있는 백업: 이 컴퓨터의 자동 백업 + 바깥 백업 폴더. 하나씩 열어 보고 멀쩡한지·무엇이 들었는지 알려 준다 */
+    candidates() {
+      const out = [];
+      const scan = (source, dir, re) => {
+        let files = []; try { files = fs.readdirSync(dir).filter((f) => re.test(f)); } catch { return; }
+        for (const f of files) {
+          const full = path.join(dir, f);
+          let at = 0, size = 0; try { const s = fs.statSync(full); at = s.mtimeMs; size = s.size; } catch { continue; }
+          try { out.push({ source, file: f, at, size, ok: true, ...counts(readBackup(full)) }); }
+          catch (e) { out.push({ source, file: f, at, size, ok: false, error: e.message }); }
+        }
+      };
+      scan('local', localDir, LOCAL_RE);
+      if (st.dir) scan('external', path.join(st.dir, FOLDER), EXTERNAL_RE);
+      return { externalDir: st.dir ? path.join(st.dir, FOLDER) : '', list: out.sort((a, b) => b.at - a.at) };
+    },
+    /** 위 목록에서 고른 백업으로 되살리기 */
+    async restoreCandidate(source, file) {
+      const f = path.basename(String(file || ''));
+      if (source === 'local') return this.restoreLocal(f);
+      if (source !== 'external' || !st.dir || !EXTERNAL_RE.test(f)) throw bad('그 백업 파일을 찾을 수 없습니다.', 404);
+      const full = path.join(st.dir, FOLDER, f);
+      if (!fs.existsSync(full)) throw bad('그 백업 파일을 찾을 수 없습니다. USB나 클라우드 폴더가 연결되어 있는지 확인해 주세요.', 404);
+      return restoreObj(readBackup(full), f);
     },
     /** 받은 백업 파일(.json 또는 백업 zip)에서 되살리기 */
     async restoreUpload(buf, name) {

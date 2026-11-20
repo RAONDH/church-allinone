@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Cert, ChurchEvent, GcalCal, Member, Visit } from '../lib/types';
 import { eventsOn, monthGrid, upcomingEvents } from '../lib/admin';
@@ -226,6 +227,7 @@ function GcalCard({ cals, reload }: { cals: GcalCal[]; reload: () => Promise<voi
 }
 
 function EventDialog({ ev, date, onClose, reload }: { ev: ChurchEvent | null; date: string; onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const [f, setF] = useState({ date: ev?.date || date, endDate: ev?.endDate || '', time: ev?.time || '', title: ev?.title || '', kind: ev?.kind || '행사', place: ev?.place || '', memo: ev?.memo || '' });
   const [err, setErr] = useState('');
@@ -237,8 +239,8 @@ function EventDialog({ ev, date, onClose, reload }: { ev: ChurchEvent | null; da
     try { await api(`${base}/events/${ev.id}`, { method: 'DELETE' }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{ev ? '일정 고치기' : '일정 추가'}</h2>
         <label>일정 이름<input autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="예: 제직회, 성탄 발표회" /></label>
         <div className="form-grid">
@@ -252,7 +254,7 @@ function EventDialog({ ev, date, onClose, reload }: { ev: ChurchEvent | null; da
         {err && <p className="alert err">{err}</p>}
         <div className="row between">
           {ev ? <button className="danger-link" onClick={remove}>일정 지우기</button> : <span />}
-          <div className="row"><button onClick={onClose}>취소</button><button className="primary" onClick={save}>저장</button></div>
+          <div className="row"><button onClick={g.close}>취소</button><button className="primary" onClick={save}>저장</button></div>
         </div>
       </div>
     </div>

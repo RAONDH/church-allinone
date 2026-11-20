@@ -470,3 +470,49 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .bul-text textarea { width: 100%; margin-top: 6px; }
 .bul-preview { position: relative; overflow: hidden; border: 1px solid #ddd; border-radius: 10px; background: #f3f1ec; }
 .bul-preview iframe { border: 0; transform-origin: 0 0; position: absolute; left: 0; top: 0; }
+
+/* 자료 파일이 깨졌을 때 복구 화면 */
+.recovery { max-width: 760px; margin: 24px auto; border-left: 4px solid #c0392b; }
+.recovery h1 { font-size: 1.4rem; margin-top: 0; }
+.recovery h2 { font-size: 1.1rem; margin: 18px 0 8px; }
+.recovery-list { list-style: none; padding: 0; margin: 0; }
+.recovery-list li { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.recovery label.backup-file { display: inline-block; cursor: pointer; font-weight: 400; padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.recovery-fresh { margin-top: 18px; }
+.recovery-fresh summary { cursor: pointer; color: var(--muted, #666); }
+
+/* 주보 편집: 단·면마다 분량 */
+.bul-right { min-width: 0; }
+.bul-fit { margin: 0 0 8px; }
+.bul-fit ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.bul-fit li { display: flex; align-items: center; gap: 6px; font-size: .9rem; }
+.bul-fit .fit-meter { display: inline-block; width: 70px; height: 8px; border-radius: 4px; background: #e6e2d8; overflow: hidden; }
+.bul-fit .fit-meter span { display: block; height: 100%; background: var(--done); }
+.bul-fit .fit-near .fit-meter span { background: #d9a400; }
+.bul-fit .fit-over .fit-meter span { background: var(--warn); }
+.bul-fit .fit-near > span:last-child { color: #8a6a00; }
+.bul-fit .fit-over > span:last-child { color: var(--warn); font-weight: 700; }
+
+/* 설정 → AI 연결 */
+.ai-list { list-style: none; padding: 0; margin: 0 0 8px; }
+.ai-list li { padding: 4px 0; }
+
+/* 주보 확정본 */
+.bul-final { margin-top: 10px; padding: 8px 12px; border: 1px dashed var(--line); border-radius: 10px; background: #fbfaf6; }
+.bul-final p { margin: 4px 0; }
+
+/* 주보 그림: 고정 정보의 로고, 주보 편집의 사진 칸 */
+.logo-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.logo-thumb { max-height: 48px; max-width: 140px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 2px; }
+.bul-photo img { display: block; max-width: 100%; max-height: 180px; object-fit: contain; margin: 6px 0; border-radius: 6px; border: 1px solid var(--line); }
+
+/* 주보 꾸미기 */
+.bul-style { max-width: 980px; }
+.style-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.style-pick { display: inline-flex; align-items: center; gap: 2px; }
+.style-pick > button[role="radio"] { border-radius: 999px; padding: 5px 12px; display: inline-flex; gap: 6px; align-items: center; }
+.style-pick.on > button[role="radio"] { border-color: var(--accent, #2f5d50); box-shadow: 0 0 0 2px #2f5d5033; font-weight: 700; }
+.style-ai { margin: 6px 0; }
+.style-ai textarea, .style-css textarea { width: 100%; }
+.style-css textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+.style-css { margin-top: 10px; }

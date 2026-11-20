@@ -16,13 +16,19 @@ export function openStore(dataDir, ws, { onSaved } = {}) {
   fs.mkdirSync(path.join(dataDir, 'backups'), { recursive: true });
   const file = path.join(dataDir, `${ws}.json`);
   let db = empty();
+  // 파일이 깨졌으면: 지우지 않고 옆에 보관하고, 복구할 때까지 저장을 멈춘다.
+  // (빈 자료로 저장해 버리면 깨진 파일마저 덮어써지고, 화면은 '처음 설정'처럼 보여 놀라게 됨)
+  let broken = null;
   if (fs.existsSync(file)) {
-    try { db = { ...empty(), ...JSON.parse(fs.readFileSync(file, 'utf8')) }; }
-    catch (e) {
-      // 파일이 깨졌으면 지우지 않고 옆에 보관한 뒤 빈 자료로 시작
+    try {
+      const obj = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('자료 모양이 아닙니다');
+      db = { ...empty(), ...obj };
+    } catch (e) {
       const keep = `${file}.broken-${Date.now()}`;
       fs.copyFileSync(file, keep);
-      console.error(`자료 파일을 읽지 못해 ${keep} 로 보관했습니다:`, e.message);
+      broken = { kept: path.basename(keep), error: e.message, at: Date.now(), size: fs.statSync(file).size };
+      console.error(`자료 파일을 읽지 못해 ${keep} 로 보관했습니다. 복구할 때까지 저장을 멈춥니다:`, e.message);
     }
   }
   let chain = Promise.resolve();
@@ -35,10 +41,11 @@ export function openStore(dataDir, ws, { onSaved } = {}) {
     for (const f of old.slice(0, Math.max(0, old.length - 14))) fs.rmSync(path.join(dataDir, 'backups', f));
   }
   const st = { lastSavedAt: 0, lastError: '', lastErrorAt: 0 };
-  function save() {
+  function save({ skipBackup = false } = {}) {
+    if (broken) return Promise.reject(Object.assign(new Error('자료 파일이 깨져 있어 저장을 멈췄습니다. 복구 화면에서 백업을 골라 주세요.'), { code: 503 }));
     const run = chain.then(async () => {
       try {
-        backup();
+        if (!skipBackup) backup();
         const tmp = `${file}.tmp`;
         await fs.promises.writeFile(tmp, JSON.stringify(db, null, 1));
         await fs.promises.rename(tmp, file);
@@ -58,7 +65,11 @@ export function openStore(dataDir, ws, { onSaved } = {}) {
     get db() { return db; },
     save,
     /** 마지막으로 저장한 시각과 실패 내용 (화면 표시용) */
-    status: () => ({ ...st }),
-    reset(next) { db = { ...empty(), ...next }; return save(); },
+    status: () => ({ ...st, broken }),
+    /** 자료 파일이 깨져서 저장을 멈췄으면 그 내용 (보관한 파일 이름·오류), 아니면 null */
+    get broken() { return broken; },
+    /** 자료를 통째로 바꾼다 (되살리기·예제 초기화). 깨진 상태였으면 풀린다.
+     *  깨진 파일을 오늘 자동 백업으로 복사하지 않는다 (좋은 옛 백업이 밀려 지워지지 않게) */
+    reset(next) { const was = !!broken; broken = null; db = { ...empty(), ...next }; return save({ skipBackup: was }); },
   };
 }

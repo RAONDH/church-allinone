@@ -1,5 +1,5 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
+  constructor(public status: number, message: string, public data: any = null) { super(message); }
 }
 
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -16,6 +16,6 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   const j = await r.json().catch(() => ({}));
   // 잠긴 자료(성도·재정·행정)면 잠금 화면을 띄우게 알린다
   if (r.status === 423) window.dispatchEvent(new Event('allinone-locked'));
-  if (!r.ok) throw new ApiError(r.status, j.error || `요청을 처리하지 못했습니다 (${r.status})`);
+  if (!r.ok) throw new ApiError(r.status, j.error || `요청을 처리하지 못했습니다 (${r.status})`, j);
   return j as T;
 }

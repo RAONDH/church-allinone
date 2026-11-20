@@ -10,7 +10,7 @@ import { openStore, uid } from './store.mjs';
 import { parseShareLink, fetchSetlist, applySetlist } from './musicsheet.mjs';
 import { httpWc, memoryWc, findLinks, applyWeek, copyService, summarize, snapshot, fingerprint, diffSnapshots } from './wc.mjs';
 import { sampleWcSeed, sampleHubSeed, samplePeopleSeed, sampleFinanceSeed, sampleAdminSeed, sampleServeSeed } from './sample.mjs';
-import { aiStatus, generate, LABELS } from './ai.mjs';
+import { aiStatus, generate, LABELS, PROVIDERS, setGeminiKey } from './ai.mjs';
 import { KINDS, MIN_NOTES, buildPrompt, extractResult, sampleResult } from './after.mjs';
 import { peopleApi } from './people.mjs';
 import { financeApi } from './finance.mjs';
@@ -19,7 +19,8 @@ import { makeUpdater } from './update.mjs';
 import { bootingFile } from './boot.mjs';
 import { makeBackups } from './backup.mjs';
 import { makeLock, areaOf } from './lock.mjs';
-import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS } from './bulletin.mjs';
+import { cleanCss, cleanStyleSettings, THEMES, STYLE_SYSTEM, stylePrompt, extractCss, sampleStyle } from './bulletinStyle.mjs';
+import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS, cleanImage, fillImages, pruneImages } from './bulletin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -53,7 +54,7 @@ const spaces = {
 backups = makeBackups({ dataDir: DATA_DIR, store: spaces.real.store, isBusy: () => busyNow() });
 // 성도·재정·행정 잠금 (실제 교회 자료만). 자료 폴더에 '잠금풀기.txt' 가 있으면 켤 때 잠금을 없앤다
 const lock = makeLock({ dataDir: DATA_DIR });
-if (lock.applyReset(spaces.real.store.db)) { await spaces.real.store.save(); console.log('[잠금] 잠금풀기 파일이 있어 잠금을 없앴습니다.'); }
+if (!spaces.real.store.broken && lock.applyReset(spaces.real.store.db)) { await spaces.real.store.save(); console.log('[잠금] 잠금풀기 파일이 있어 잠금을 없앴습니다.'); }
 backups.external().catch(() => {});   // 켤 때 한 번 (오늘 아직 안 했으면)
 
 async function resetSample() {
@@ -97,6 +98,7 @@ const WEEK_FIELDS = {
   announcements: (v) => (Array.isArray(v) ? v.map((x) => str(x, 300)).slice(0, 30) : undefined),
   sermonNotes: (v) => str(v, 100000), sermonVideoUrl: (v) => str(v, 300), prayerLeader: (v) => str(v, 40),
 };
+const WEEK_LABEL = { date: '날짜', name: '예배 이름', passage: '본문', sermonTitle: '설교 제목', announcements: '광고', sermonNotes: '설교 원고', sermonVideoUrl: '설교 영상 주소', prayerLeader: '대표 기도' };
 function cleanWeek(b) {
   const out = {};
   for (const [k, f] of Object.entries(WEEK_FIELDS)) if (b[k] !== undefined) { const v = f(b[k]); if (v !== undefined) out[k] = v; }
@@ -202,6 +204,9 @@ function afterRun(job, task) {
   if (afterBusy < AFTER_MAX) go(); else { job.waiting = true; afterWait.push(go); }
 }
 
+// 주보 편집: 저장하기 전 글로 보는 미리보기 (표 → 칸 글, 10분 뒤 사라짐, 메모리에만)
+const bulletinDrafts = new Map();
+
 // 백업 모듈의 오류(code 400·404·409)를 화면에 그대로 알린다
 const wrapB = async (fn) => { try { return await fn(); } catch (e) { throw e.code >= 400 && e.code < 500 ? new HttpError(e.code, e.message) : e; } };
 
@@ -219,8 +224,25 @@ async function api(req, res, url) {
     updater.install();   // 뒤에서 받고 설치한다. 화면은 /api/update 의 job 으로 진행을 본다
     return send(res, 200, updater.view());
   }
+  // ── AI 연결 상태와 제미나이 API 키 (키 값은 돌려주지 않음. 키는 PraiseFlow 와 함께 씀) ──
+  if (p === '/api/ai' && req.method === 'GET') return send(res, 200, await aiStatus(url.searchParams.has('refresh')));
+  if (p === '/api/ai/gemini-key' && req.method === 'PUT') { const b = await body(req); await wrapB(() => setGeminiKey(b.key)); return send(res, 200, await aiStatus(true)); }
   // ── 백업 (실제 교회 자료만) ──
   if (p === '/api/backup' && req.method === 'GET') return send(res, 200, backups.view());
+  // ── 자료 파일이 깨졌을 때 복구 (실제 교회 자료) ──
+  // 깨진 동안에는 아래 작업 공간 주소가 모두 503 으로 막히고, 화면은 복구 화면을 띄운다
+  if (p === '/api/recovery' && req.method === 'GET') {
+    const broken = spaces.real.store.broken;
+    return send(res, 200, broken ? { broken, ...backups.candidates() } : { broken: null, list: [] });
+  }
+  if (p.startsWith('/api/recovery/') && !spaces.real.store.broken) throw new HttpError(409, '자료 파일이 멀쩡해서 복구할 것이 없습니다. 지난 백업으로 되돌리려면 설정 > 백업에서 해 주세요.');
+  if (p === '/api/recovery/restore' && req.method === 'POST') { const b = await body(req); return send(res, 200, await wrapB(() => backups.restoreCandidate(b.source, b.file))); }
+  if (p === '/api/recovery/fresh' && req.method === 'POST') {
+    const b = await body(req);
+    if (b.confirm !== '새로 시작') throw new HttpError(400, '빈 자료로 새로 시작하려면 확인 글자를 넣어 주세요.');
+    await spaces.real.store.reset({});
+    return send(res, 200, { ok: true });
+  }
   // 잠금을 켰으면 상태 보기만 빼고 모든 백업 기능(폴더 바꾸기·지금 백업·받기·되살리기)은 암호 뒤에
   if (p.startsWith('/api/backup/')) await wrapB(() => lock.guardAny(spaces.real.store.db, req));
   if (p === '/api/backup/settings' && req.method === 'PUT') { const b = await body(req); const r = await wrapB(() => backups.setDir(b.dir)); return send(res, 200, { ...backups.view(), result: r }); }
@@ -267,6 +289,9 @@ async function api(req, res, url) {
   // 저장 상태 (저장이 실패하면 화면 위에 알리고, [다시 저장]으로 바로 다시 시도)
   if (sub === '/save-status' && req.method === 'GET') return send(res, 200, sp.store.status());
   if (sub === '/save-status/retry' && req.method === 'POST') { await sp.store.save().catch(() => {}); return send(res, 200, sp.store.status()); }
+
+  // 자료 파일이 깨졌으면 복구할 때까지 실제 교회 자료는 읽지도 저장하지도 않는다 (빈 자료가 '처음 설정'처럼 보이지 않게)
+  if (r[1] === 'real' && sp.store.broken) return send(res, 503, { error: '자료 파일이 깨져 있어 읽지 못했습니다. 백업을 골라 되살려 주세요.', broken: sp.store.broken });
 
   // ── 잠금 (실제 교회 자료의 성도·재정·행정) ──
   if (r[1] === 'real') {
@@ -331,7 +356,16 @@ async function api(req, res, url) {
     if (req.method === 'GET') return send(res, 200, { week: pub(w), status: await weekStatus(sp, w) });
     if (req.method === 'PUT') {
       const b = await body(req);
-      Object.assign(w, cleanWeek(b), { updatedAt: Date.now() });
+      const next = cleanWeek(b);
+      // 두 창에서 같은 예배를 고칠 때: 화면은 고친 칸만 보내고, 고치기 시작할 때의 값(_base)을 함께 보낸다.
+      // 그 사이 다른 창이 같은 칸을 바꿨으면 덮어쓰지 않고 알려 준다 (_base 가 없으면 예전처럼 그대로 저장)
+      if (b._base && typeof b._base === 'object') {
+        const was = cleanWeek(b._base), J = JSON.stringify;
+        const conflicts = Object.keys(next).filter((k) => k in was && J(w[k] ?? '') !== J(was[k] ?? '') && J(w[k] ?? '') !== J(next[k]))
+          .map((k) => ({ field: k, label: WEEK_LABEL[k] || k, theirs: w[k] ?? '' }));
+        if (conflicts.length) return send(res, 409, { error: `다른 창에서 ${conflicts.map((c) => `‘${c.label}’`).join('·')}을(를) 먼저 바꿨습니다.`, conflicts });
+      }
+      Object.assign(w, next, { updatedAt: Date.now() });
       await sp.store.save();   // 라온 교회 올인원 저장은 예배송출 연결과 상관없이 먼저 끝낸다
       const sync = await wcTry(() => applyWeek(sp.wc(), w, { shared: isNewest(sp, w) }));
       return send(res, 200, { week: pub(w), sync });
@@ -489,7 +523,52 @@ async function api(req, res, url) {
   // 주보: 고정 정보(주소·예배 시간·계좌·표어)와 보일 칸 고르기, 인쇄용·휴대폰 주보 만들기
   if (sub === '/bulletin' && req.method === 'GET') return send(res, 200, cleanBulletinSettings({ ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) }));
   if (sub === '/bulletin' && req.method === 'PUT' && r[1] === 'real') await wrapB(() => lock.guardAny(db, req));   // 잠금 중에는 주보 칸(생일 등)을 켜지 못하게
-  if (sub === '/bulletin' && req.method === 'PUT') { db.bulletin = cleanBulletinSettings(await body(req)); await sp.store.save(); return send(res, 200, db.bulletin); }
+  if (sub === '/bulletin' && req.method === 'PUT') { db.bulletin = cleanBulletinSettings(await body(req)); pruneImages(db); await sp.store.save(); return send(res, 200, db.bulletin); }
+  // 주보 그림 올리기 (화면이 크기를 줄여 data URL 로 보냄) → 번호. 같은 그림은 한 번만 둔다
+  // 주보 꾸미기 (겉모양만): 기본 스타일 목록 · 고른 스타일 저장 · AI 로 새 스타일 만들기
+  // 겉모양은 성도 정보를 드러내지 않으므로 잠금과 상관없이 바꿀 수 있다. AI 에는 분위기 설명만 보낸다(교회 자료는 보내지 않음).
+  if (sub === '/bulletin/style' && req.method === 'GET') {
+    const cur = cleanBulletinSettings({ ...BULLETIN_DEFAULTS, ...(db.bulletin || {}) });
+    return send(res, 200, { themes: Object.entries(THEMES).map(([id, t]) => ({ id, name: t.name, css: t.css })), theme: cur.theme, customCss: cur.customCss, customName: cur.customName, myStyles: cur.myStyles });
+  }
+  if (sub === '/bulletin/style' && req.method === 'PUT') {
+    const b = await body(req);
+    const cur = db.bulletin || {};
+    const next = cleanStyleSettings({ theme: b.theme ?? cur.theme, customCss: b.customCss ?? cur.customCss, customName: b.customName ?? cur.customName, myStyles: b.myStyles ?? cur.myStyles });
+    db.bulletin = cleanBulletinSettings({ ...BULLETIN_DEFAULTS, ...cur, ...next });
+    await sp.store.save();
+    return send(res, 200, { theme: db.bulletin.theme, customCss: db.bulletin.customCss, customName: db.bulletin.customName, myStyles: db.bulletin.myStyles });
+  }
+  if (sub === '/bulletin/style/ai' && req.method === 'POST') {
+    const b = await body(req);
+    const desc = String(b.desc ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, 500);
+    if (desc.length < 2) throw new HttpError(400, '원하는 주보 분위기를 적어 주세요. 예: 고풍스러운 명조체, 진한 초록과 금색');
+    const base = b.base ? cleanCss(b.base).css : '';
+    if (r[1] === 'sample') { await new Promise((ok) => setTimeout(ok, 300)); const x = sampleStyle(desc); return send(res, 200, { ...x, dropped: 0, via: '예제 (AI를 부르지 않음)', sample: true }); }
+    const st = await aiStatus(true);
+    const provider = PROVIDERS.includes(b.provider) && st[b.provider]?.loggedIn ? b.provider : st.provider;
+    if (!provider) throw new HttpError(400, '연결된 AI가 없습니다. 설정 > AI 연결에서 Claude·ChatGPT 구독에 로그인하거나 제미나이 API 키를 넣어 주세요. AI 없이도 기본 스타일은 고를 수 있습니다.');
+    let text;
+    try { text = await generate(provider, STYLE_SYSTEM, stylePrompt(desc, base)); }
+    catch (e) { throw new HttpError(502, e.message || 'AI가 답하지 않았습니다.'); }
+    const { css: rawCss, name } = extractCss(text);
+    const { css, dropped } = cleanCss(rawCss);
+    if (!css) throw new HttpError(502, 'AI가 주보에 쓸 수 있는 꾸밈을 만들지 못했습니다. 설명을 조금 바꿔 다시 해 주세요.');
+    return send(res, 200, { css, name: name || desc.slice(0, 20), dropped, via: LABELS[provider] });
+  }
+  if (sub === '/bulletin/images' && req.method === 'POST') {
+    const b = await body(req, 2e6);
+    const { id, data } = await wrapB(() => cleanImage(b.data));
+    (db.bulletinImages ||= {})[id] = { data, at: Date.now() };
+    await sp.store.save();
+    return send(res, 200, { id });
+  }
+  if ((q = s(/^\/bulletin\/images\/([a-f0-9]{16})$/)) && req.method === 'GET') {
+    const m = String(db.bulletinImages?.[q[1]]?.data || '').match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/);
+    if (!m) throw new HttpError(404, '그림을 찾을 수 없습니다.');
+    res.writeHead(200, { 'Content-Type': m[1], 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff' });
+    res.end(Buffer.from(m[2], 'base64')); return;
+  }
   // 주보 편집 창: 칸마다 자동 내용과 이번 주에 고친 글
   const bulletinHide = () => (r[1] === 'real' ? { people: !lock.isOpen(db, req, 'people'), admin: !lock.isOpen(db, req, 'admin') } : {});
   const bulletinOrder = async (w) => {
@@ -501,12 +580,14 @@ async function api(req, res, url) {
     const w = getWeek(sp, q[1]);
     if (req.method === 'PUT') {
       const b = await body(req);
-      const v = cleanWeekBlock(b);
+      const v = await wrapB(() => cleanWeekBlock(b));
       if (!v) throw new HttpError(400, '없는 주보 칸입니다.');
       // 성도·행정 정보가 든 칸은 잠금을 풀어야 고칠 수 있다
       if (r[1] === 'real' && PRIVATE_BLOCKS[b.id]) for (const a of PRIVATE_BLOCKS[b.id]) await wrapB(() => lock.guard(db, req, a));
       const blocks = ((w.bulletin ||= {}).blocks ||= {});
+      if (v.img && !db.bulletinImages?.[v.img]) throw new HttpError(400, '그림을 먼저 올려 주세요.');
       if (Object.keys(v).length) blocks[b.id] = v; else delete blocks[b.id];
+      pruneImages(db);
       w.updatedAt = Date.now();
       await sp.store.save();
     } else if (req.method !== 'GET') throw new HttpError(405, '지원하지 않는 요청입니다.');
@@ -517,18 +598,99 @@ async function api(req, res, url) {
       blocks: BLOCKS.map(([id, title]) => {
         const locked = (PRIVATE_BLOCKS[id] || []).some((a) => hide[a]);
         const o = locked ? {} : w.bulletin?.blocks?.[id] || {};
-        return { id, title, locked, auto: locked ? '' : blockText(d, id), text: typeof o.text === 'string' ? o.text : null, size: o.size === 's' ? 's' : 'n' };
+        return { id, title, locked, auto: locked ? '' : blockText(d, id), text: typeof o.text === 'string' ? o.text : null, size: o.size === 's' ? 's' : 'n', ...(id === 'photo' ? { img: o.img || null } : {}) };
       }),
     });
   }
-  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
+  // 저장하기 전 글로 미리보기: 고치던 글을 잠시(10분) 맡겨 두고 표를 돌려준다 → 주보 주소에 &preview=표 를 붙여 연다.
+  // 자료에는 저장하지 않는다. 잠금 칸은 고칠 때와 똑같이 잠금을 풀어야 한다.
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin\/preview$/)) && req.method === 'POST') {
+    getWeek(sp, q[1]);
+    const b = await body(req);
+    const v = await wrapB(() => cleanWeekBlock(b));
+    if (!v) throw new HttpError(400, '없는 주보 칸입니다.');
+    if (r[1] === 'real' && PRIVATE_BLOCKS[b.id]) for (const a of PRIVATE_BLOCKS[b.id]) await wrapB(() => lock.guard(db, req, a));
+    const now = Date.now();
+    for (const [k, x] of bulletinDrafts) if (now - x.at > 10 * 60e3) bulletinDrafts.delete(k);
+    while (bulletinDrafts.size >= 50) bulletinDrafts.delete(bulletinDrafts.keys().next().value);
+    const token = uid() + uid();
+    bulletinDrafts.set(token, { ws: r[1], weekId: q[1], id: b.id, v, at: now });
+    return send(res, 200, { token });
+  }
+  // 꾸밈 미리보기: 저장하지 않은 스타일을 잠시(10분) 맡겨 두고 표를 돌려준다 → 주보 주소에 &look=표
+  if (sub === '/bulletin/style/preview' && req.method === 'POST') {
+    const b = await body(req);
+    const look = cleanStyleSettings({ theme: b.theme, customCss: b.customCss });
+    const now = Date.now();
+    for (const [k, x] of bulletinDrafts) if (now - x.at > 10 * 60e3) bulletinDrafts.delete(k);
+    while (bulletinDrafts.size >= 50) bulletinDrafts.delete(bulletinDrafts.keys().next().value);
+    const token = uid() + uid();
+    bulletinDrafts.set(token, { ws: r[1], look: { theme: look.theme, customCss: look.customCss }, at: now });
+    return send(res, 200, { token });
+  }
+  // 주보 확정본: [주보 확정]을 누른 때의 주보를 세 모양(인쇄용·4면·휴대폰) 그대로 보관한다 (차수·확정 시각).
+  // 나중에 표어·광고·배치가 바뀌어도 확정본은 그대로 열린다. 예배마다 최근 FINAL_KEEP 개까지.
+  // 확정할 때 잠금으로 가려진 칸(hide)도 함께 적어 두고, 바뀜 비교와 열람 잠금에 쓴다.
+  const FINAL_KEEP = 5;
+  const renderAll = async (w, hide) => {
+    const order = await bulletinOrder(w);
+    const d = bulletinData({ db, week: w, order, hide, imgToken: true });   // 그림은 자리표로 (보여 줄 때 채움)
+    return { print: bulletinHtml(d, 'print'), fold4: bulletinHtml(d, 'fold4'), mobile: bulletinHtml(d, 'mobile') };
+  };
+  const finalsView = async (w) => {
+    const list = w.bulletin?.finals || [];
+    const last = list.at(-1);
+    let changed = null;
+    if (last) changed = (await renderAll(w, last.hide)).print !== last.html.print;
+    return { finals: list.map((f) => ({ v: f.v, at: f.at })).reverse(), changed };
+  };
+  // 확정본에 봉사자 이름·생일·일정이 들어 있으면 그 잠금을 풀어야 연다
+  const guardFinal = async (f) => {
+    if (r[1] !== 'real') return;
+    if (!f.hide?.people) await wrapB(() => lock.guard(db, req, 'people'));
+    if (!f.hide?.admin) await wrapB(() => lock.guard(db, req, 'admin'));
+  };
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin\/finals$/))) {
     const w = getWeek(sp, q[1]);
+    if (req.method === 'POST') {
+      const hide = bulletinHide();
+      const html = await renderAll(w, hide);
+      const finals = ((w.bulletin ||= {}).finals ||= []);
+      const v = (finals.at(-1)?.v || 0) + 1;
+      finals.push({ v, at: Date.now(), hide: { people: !!hide.people, admin: !!hide.admin }, html });
+      if (finals.length > FINAL_KEEP) finals.splice(0, finals.length - FINAL_KEEP);
+      pruneImages(db);
+      await sp.store.save();
+    } else if (req.method !== 'GET') throw new HttpError(405, '지원하지 않는 요청입니다.');
+    return send(res, 200, await finalsView(w));
+  }
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET' && url.searchParams.has('final')) {
+    const w = getWeek(sp, q[1]);
+    const f = (w.bulletin?.finals || []).find((x) => String(x.v) === url.searchParams.get('final'));
+    if (!f) throw new HttpError(404, '그 확정본을 찾을 수 없습니다. (예배마다 최근 5개까지 보관합니다)');
+    await guardFinal(f);
+    const format = ['mobile', 'fold4'].includes(url.searchParams.get('format')) ? url.searchParams.get('format') : 'print';
+    const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
+    if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}-v${f.v}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date} 확정${f.v}차.html`)}`;
+    const at = new Date(f.at).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    // 화면에서만 보이는 확정본 표시 (인쇄·휴대폰 파일 본문에는 넣지 않음)
+    const note = format === 'mobile' ? '' : `<p class="how final-note" style="background:#e8f3ec;border-color:#9cc8ad">📌 확정본 ${f.v}차 · ${at} 확정 · 그 뒤에 바뀐 내용은 들어 있지 않습니다.</p>`;
+    res.writeHead(200, headers);
+    res.end(fillImages(f.html[format], db).replace(/(<body[^>]*>)/, `$1${note}`)); return;
+  }
+  if ((q = s(/^\/weeks\/([a-f0-9]+)\/bulletin$/)) && req.method === 'GET') {
+    let w = getWeek(sp, q[1]);
+    const dr = bulletinDrafts.get(url.searchParams.get('preview') || '');
+    if (dr && !dr.look && dr.ws === r[1] && dr.weekId === w.id) w = { ...w, bulletin: { ...(w.bulletin || {}), blocks: { ...(w.bulletin?.blocks || {}), [dr.id]: dr.v } } };
     const order = await bulletinOrder(w);
     const format = ['mobile', 'fold4'].includes(url.searchParams.get('format')) ? url.searchParams.get('format') : 'print';
     const headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:" };
     if (url.searchParams.has('download')) headers['Content-Disposition'] = `attachment; filename="bulletin-${w.date}.html"; filename*=UTF-8''${encodeURIComponent(`${db.church?.name || '교회'} 주보 ${w.date}.html`)}`;
     res.writeHead(200, headers); const hide = bulletinHide();
-    res.end(bulletinHtml(bulletinData({ db, week: w, order, hide }), format)); return;
+    const d = bulletinData({ db, week: w, order, hide });
+    const lk = bulletinDrafts.get(url.searchParams.get('look') || '');
+    if (lk?.look && lk.ws === r[1]) d.s = { ...d.s, ...lk.look };
+    res.end(bulletinHtml(d, format)); return;
   }
 
   // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 라온 교회 올인원)
@@ -638,8 +800,8 @@ async function api(req, res, url) {
     let provider = 'sample';
     if (!sample) {
       const st = await aiStatus(true);
-      provider = (b.provider === 'claude' || b.provider === 'codex') && st[b.provider].loggedIn ? b.provider : st.provider;
-      if (!provider) throw new HttpError(400, '이 컴퓨터에 로그인된 AI 구독이 없습니다. Claude Code(claude) 또는 Codex(codex login)에 로그인해 주세요.');
+      provider = PROVIDERS.includes(b.provider) && st[b.provider]?.loggedIn ? b.provider : st.provider;
+      if (!provider) throw new HttpError(400, '연결된 AI가 없습니다. Claude Code(claude)·Codex(codex login)에 로그인하거나, 설정 > AI 연결에서 제미나이 API 키를 넣어 주세요.');
     }
     const ctx = { church: db.church?.name || '', pastor: db.church?.pastor || '', theology: db.church?.theology || '', date: w.date, service: w.name, passage: w.passage, title: w.sermonTitle, notes: w.sermonNotes.trim().slice(0, 60000) };
     const job = { startedAt: Date.now(), provider, label: sample ? '예제' : LABELS[provider] };

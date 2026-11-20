@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import { autoFill, nextServe, sundaysOf, whoName } from '../lib/serve';
 import type { Admin as AdminData, Member, Serve, ServeRole } from '../lib/types';
@@ -111,6 +112,7 @@ export default function ServeTab({ data, members, reload }: { data: AdminData; m
 
 // 한 칸(날짜×봉사) 바꾸기: 맡는 분을 먼저, 그 밖의 성도와 명부에 없는 이름도
 function CellDialog({ date, role, serve, members, onClose, onSave }: { date: string; role: ServeRole; serve: Serve; members: Member[]; onClose: () => void; onSave: (xs: string[]) => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const init = serve.plan[date]?.[role.id] || [];
   const [pick, setPick] = useState<string[]>(init.filter((x) => members.some((m) => m.id === x)));
   const [text, setText] = useState(init.filter((x) => !members.some((m) => m.id === x)).join(', '));
@@ -122,8 +124,8 @@ function CellDialog({ date, role, serve, members, onClose, onSave }: { date: str
   const Chip = ({ m }: { m: Member }) => <button className={`chip ${pick.includes(m.id) ? 'on' : ''}`} onClick={() => toggle(m.id)} title={busy.has(m.id) ? '이날 다른 봉사도 맡았습니다' : ''}>{m.name}{busy.has(m.id) ? ' ·' : ''}</button>;
   const result = [...pick, ...text.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)];
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{md(date)} ({dow(date)}) {role.name}</h2>
         <p className="muted small">{role.count}명 · 고른 분 {result.length}명{busy.size ? ' · 이름 옆 점(·)은 이날 다른 봉사도 맡은 분' : ''}</p>
         {pool.length > 0 && <><div className="small"><b>맡는 분</b></div><div className="chips">{pool.map((m) => <Chip key={m.id} m={m} />)}</div></>}
@@ -132,7 +134,7 @@ function CellDialog({ date, role, serve, members, onClose, onSave }: { date: str
         <label>명부에 없는 분 (쉼표로 나눔)<input value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 반주자 홍길동, 외부 강사" /></label>
         <div className="row between">
           <button className="danger-link" onClick={() => onSave([])}>이 칸 비우기</button>
-          <div className="row"><button onClick={onClose}>닫기</button><button className="primary" onClick={() => onSave(result)}>저장</button></div>
+          <div className="row"><button onClick={g.close}>닫기</button><button className="primary" onClick={() => onSave(result)}>저장</button></div>
         </div>
       </div>
     </div>
@@ -141,6 +143,7 @@ function CellDialog({ date, role, serve, members, onClose, onSave }: { date: str
 
 // 봉사 종류(이름·인원) 고치기와 봉사마다 '맡는 분' 고르기
 function RolesDialog({ serve, members, onClose, reload }: { serve: Serve; members: Member[]; onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const [roles, setRoles] = useState<ServeRole[]>(serve.roles.map((r) => ({ ...r, pool: [...r.pool] })));
   const [open, setOpen] = useState<number>(roles.findIndex((r) => !r.pool.length));
@@ -157,8 +160,8 @@ function RolesDialog({ serve, members, onClose, reload }: { serve: Serve; member
     try { await api(`${base}/serve/roles`, { method: 'PUT', body: { roles } }); await reload(); onClose(); } catch (e: any) { setErr(e.message); setBusy(false); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>봉사 종류·맡는 분</h2>
         <p className="muted small">봉사마다 맡는 분을 고르면, '빈 칸 돌아가며 채우기'가 고른 순서대로 차례를 돌립니다. 이름·인원·순서는 교회에 맞게 바꾸세요.</p>
         <ul className="role-list">
@@ -190,7 +193,7 @@ function RolesDialog({ serve, members, onClose, reload }: { serve: Serve; member
         {err && <p className="alert err">{err}</p>}
         <div className="row between">
           <span />
-          <div className="row"><button onClick={onClose}>닫기</button><button className="primary" disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button></div>
+          <div className="row"><button onClick={g.close}>닫기</button><button className="primary" disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button></div>
         </div>
       </div>
     </div>

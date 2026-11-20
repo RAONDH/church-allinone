@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Member, People as PeopleData, Tx, Visit } from '../lib/types';
 import { absentees, attendanceWeeks, ageOf, HIST_LABEL, memberHistory, type HistKind, upcomingBirthdays, BAPTISMS, dueVisits, familyOf, lastSunday, lastVisitMap, nextBirthday, parsePaste, STATUS_LABEL, VISIT_KINDS } from '../lib/people';
@@ -131,6 +132,7 @@ function MemberList({ data, reload }: { data: PeopleData; reload: () => Promise<
 const blank = (): Omit<Member, 'id' | 'createdAt' | 'updatedAt'> => ({ name: '', gender: '', birth: '', lunar: false, phone: '', address: '', role: '', group: '', baptism: '', registeredAt: '', status: 'active', familyId: '', relation: '', memo: '' });
 
 function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; member: Member | null; onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const [f, setF] = useState(member ? { ...member } : blank());
   const [familyWith, setFamilyWith] = useState<string | undefined>(undefined);
@@ -161,8 +163,8 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
   };
 
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{member ? `${member.name} 님` : '성도 추가'}</h2>
         <div className="form-grid">
           <label>이름<input value={f.name} onChange={set('name')} autoFocus={!member} /></label>
@@ -207,7 +209,7 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
         <div className="row between">
           {member ? <button className="danger-link" onClick={remove}>명부에서 지우기</button> : <span />}
           <div className="row">
-            <button onClick={onClose}>닫기</button>
+            <button onClick={g.close}>닫기</button>
             <button className="primary" disabled={busy} onClick={() => save()}>{busy ? '저장 중…' : '저장'}</button>
           </div>
         </div>
@@ -218,6 +220,7 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
 }
 
 function ImportDialog({ onClose, reload }: { onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const [text, setText] = useState('');
   const [err, setErr] = useState('');
@@ -232,8 +235,8 @@ function ImportDialog({ onClose, reload }: { onClose: () => void; reload: () => 
   };
   const LABEL: Record<string, string> = { name: '이름', gender: '성별', birth: '생일', lunar: '음력', phone: '전화', address: '주소', role: '직분', group: '구역', baptism: '세례', registeredAt: '등록일', family: '가족', relation: '관계', memo: '메모' };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>엑셀에서 붙여 넣기</h2>
         <p className="muted small">엑셀·한글 표에서 <b>칸 이름 줄까지 함께</b> 복사해 아래에 붙여 넣으세요. 알아듣는 칸: 이름, 성별, 생년월일, 음력, 전화, 주소, 직분, 구역(소그룹·목장), 세례, 등록일, 가족, 관계, 메모.<br />
           '가족' 칸에 같은 글자(예: 세대주 이름)를 쓴 분들은 한 가족으로 묶입니다. 이미 있는 성도와 겹쳐도 새로 추가되니 처음 한 번만 쓰세요.</p>
@@ -249,7 +252,7 @@ function ImportDialog({ onClose, reload }: { onClose: () => void; reload: () => 
         )}
         {err && <p className="alert err">{err}</p>}
         <div className="row end">
-          <button onClick={onClose}>취소</button>
+          <button onClick={g.close}>취소</button>
           <button className="primary" disabled={busy || !p.rows.length} onClick={go}>{p.rows.length}명 넣기</button>
         </div>
       </div>
@@ -310,6 +313,7 @@ function Visits({ data, reload }: { data: PeopleData; reload: () => Promise<void
 const addMonths = (s: string, n: number) => { const d = new Date(s + 'T00:00:00'); d.setMonth(d.getMonth() + n); return ymd(d); };
 
 function VisitDialog({ data, visit, preset, onClose, reload }: { data: PeopleData; visit: Visit | null; preset: string[]; onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const today = ymd(new Date());
   const [f, setF] = useState({ memberIds: visit?.memberIds || preset, date: visit?.date || today, kind: visit?.kind || '심방', planned: visit?.planned ?? false, note: visit?.note || '' });
@@ -341,8 +345,8 @@ function VisitDialog({ data, visit, preset, onClose, reload }: { data: PeopleDat
     try { await api(`${base}/visits/${visit.id}`, { method: 'DELETE' }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{visit ? (visit.planned ? '예정된 심방' : '심방 기록') : '심방 기록·예정 추가'}</h2>
         <div className="chips">
           {f.memberIds.map((id) => <span key={id} className="chip">{names(data, [id])}<button className="icon" aria-label="빼기" onClick={() => setF({ ...f, memberIds: f.memberIds.filter((x) => x !== id) })}>×</button></span>)}
@@ -364,7 +368,7 @@ function VisitDialog({ data, visit, preset, onClose, reload }: { data: PeopleDat
         <div className="row between">
           {visit ? <button className="danger-link" onClick={remove}>기록 지우기</button> : <span />}
           <div className="row">
-            <button onClick={onClose}>취소</button>
+            <button onClick={g.close}>취소</button>
             {visit?.planned && <button onClick={() => setF({ ...f, planned: false, date: f.date > today ? today : f.date })}>다녀왔어요</button>}
             <button className="primary" onClick={save}>저장</button>
           </div>

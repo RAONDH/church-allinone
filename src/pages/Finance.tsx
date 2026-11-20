@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { Finance as FinanceData, FinanceSettings, Fund, Member, Tx } from '../lib/types';
 import { balances, byCategory, donorMonths, donors, FUNDS, monthly, parseWon, totals, won, type Donor } from '../lib/finance';
@@ -219,6 +220,7 @@ function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Mem
 }
 
 function TxDialog({ data, members, tx, onClose, reload }: { data: FinanceData; members: Member[]; tx: Tx; onClose: () => void; reload: () => Promise<void> }) {
+  const g = useGuardedClose(onClose);
   const { base } = useApp();
   const member = members.find((m) => m.id === tx.memberId);
   const [f, setF] = useState({ date: tx.date, type: tx.type, fund: tx.fund, category: tx.category, name: member?.name || tx.name, amount: String(tx.amount), note: tx.note });
@@ -232,8 +234,8 @@ function TxDialog({ data, members, tx, onClose, reload }: { data: FinanceData; m
     try { await api(`${base}/finance/tx/${tx.id}`, { method: 'DELETE' }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>장부 기록 고치기</h2>
         <datalist id="member-names-edit">{members.map((m) => <option key={m.id} value={m.name} />)}</datalist>
         <div className="form-grid">
@@ -249,7 +251,7 @@ function TxDialog({ data, members, tx, onClose, reload }: { data: FinanceData; m
         {err && <p className="alert err">{err}</p>}
         <div className="row between">
           <button className="danger-link" onClick={remove}>기록 지우기</button>
-          <div className="row"><button onClick={onClose}>취소</button><button className="primary" onClick={save}>저장</button></div>
+          <div className="row"><button onClick={g.close}>취소</button><button className="primary" onClick={save}>저장</button></div>
         </div>
       </div>
     </div>

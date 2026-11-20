@@ -31,4 +31,26 @@ describe('자료 저장', () => {
     expect(JSON.parse(fs.readFileSync(path.join(d, 'real.json'), 'utf8')).church.name).toBe('다시');
     expect(s.status().lastError).toBe('');
   });
+
+  it('자료 파일이 깨졌으면 보관하고 저장을 멈추며, 되살리면 풀리고 깨진 파일을 오늘 백업으로 넣지 않는다', async () => {
+    const d = T();
+    fs.writeFileSync(path.join(d, 'real.json'), '{"church":');
+    const s = openStore(d, 'real');
+    expect(s.broken?.kept).toMatch(/^real\.json\.broken-/);
+    expect(fs.existsSync(path.join(d, s.broken.kept))).toBe(true);
+    expect(s.status().broken).toBeTruthy();
+    await expect(s.save()).rejects.toThrow(/깨져/);
+    expect(fs.readFileSync(path.join(d, 'real.json'), 'utf8')).toBe('{"church":');
+    await s.reset({ church: { name: '되살림' }, weeks: {} });
+    expect(s.broken).toBe(null);
+    expect(JSON.parse(fs.readFileSync(path.join(d, 'real.json'), 'utf8')).church.name).toBe('되살림');
+    expect(fs.readdirSync(path.join(d, 'backups'))).toEqual([]);
+  });
+  it('자료 파일이 JSON 이지만 자료 모양이 아니어도(배열·null) 깨진 것으로 본다', () => {
+    for (const bad of ['[]', 'null', '"글"']) {
+      const d = T();
+      fs.writeFileSync(path.join(d, 'real.json'), bad);
+      expect(openStore(d, 'real').broken).toBeTruthy();
+    }
+  });
 });

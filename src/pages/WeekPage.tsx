@@ -13,7 +13,11 @@ import MusicSheetCard from './MusicSheetCard';
 
 const TABS = [['info', '예배 정보'], ['setlist', '찬양 콘티'], ['subs', '자막'], ['outputs', '결과물'], ['after', '설교 후 자료']] as const;
 const EDITABLE = ['date', 'name', 'passage', 'sermonTitle', 'announcements', 'sermonNotes', 'sermonVideoUrl', 'prayerLeader'] as const;
-type SaveState = { state: 'saved' | 'dirty' | 'saving' | 'error'; msg?: string; sync?: SyncResult; restored?: boolean };
+type Editable = typeof EDITABLE[number];
+type Conflict = { field: Editable; label: string; theirs: any };
+type SaveState = { state: 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'; msg?: string; sync?: SyncResult; restored?: boolean; conflicts?: Conflict[] };
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+const pick = (w: any) => Object.fromEntries(EDITABLE.map((k) => [k, w[k]])) as Record<Editable, any>;
 
 export default function WeekPage() {
   const { id, tab = 'info' } = useParams();
@@ -27,6 +31,9 @@ export default function WeekPage() {
   const pendingKey = `pending:${ws}:${id}`;
   const draftRef = useRef<Week | null>(null);
   const verRef = useRef(0);
+  // 서버에 있다고 알고 있는 값 (고친 칸을 가려내고, 다른 창과 부딪쳤는지 서버가 확인하는 데 씀)
+  const baseRef = useRef<Record<Editable, any> | null>(null);
+  const changedKeys = (w: Week) => EDITABLE.filter((k) => !same(w[k], baseRef.current?.[k]));
 
   const loadStatus = useCallback(() => api<WeekStatus>(`${base}/weeks/${id}/status`).then(setStatus).catch(() => {}), [base, id]);
   useEffect(() => {
@@ -35,9 +42,13 @@ export default function WeekPage() {
       // 저장하지 못하고 닫혔던 내용이 있으면 되살린다
       let pending: any = null;
       try { pending = JSON.parse(localStorage.getItem(pendingKey) || 'null'); } catch { /* 무시 */ }
-      if (pending && pending.at > w.updatedAt) {
+      baseRef.current = pick(w);
+      if (pending && pending.at > w.updatedAt && pending.fields) {
+        // 예전 형식(모든 칸)도 받되, 서버와 같은 칸은 고친 것으로 보지 않는다. base 가 있으면 그때의 값으로 충돌을 확인한다
         const merged = { ...w, ...pending.fields };
-        draftRef.current = merged; setWeek(merged); setSave({ state: 'dirty', restored: true }); verRef.current++;
+        if (pending.base) baseRef.current = { ...baseRef.current, ...pending.base };
+        draftRef.current = merged; setWeek(merged); verRef.current++;
+        setSave(changedKeys(merged).length ? { state: 'dirty', restored: true } : { state: 'saved' });
       } else { draftRef.current = w; setWeek(w); }
       setStatus(s);
     }).catch((e) => setErr(e.message));
@@ -47,18 +58,30 @@ export default function WeekPage() {
     const w = draftRef.current;
     if (!w) return;
     const v = verRef.current;
+    // 고친 칸만 보낸다 (다른 창에서 바꾼 칸을 옛 값으로 되돌리지 않게)
+    const keys = changedKeys(w);
+    if (!keys.length) { try { localStorage.removeItem(pendingKey); } catch { /* 무시 */ } setSave((s) => ({ ...s, state: 'saved', restored: false })); return; }
     setSave((s) => ({ ...s, state: 'saving' }));
-    const fields = Object.fromEntries(EDITABLE.map((k) => [k, w[k]]));
+    const fields = Object.fromEntries(keys.map((k) => [k, w[k]]));
+    const sentBase = Object.fromEntries(keys.map((k) => [k, baseRef.current![k]]));
     try {
-      const r = await api<{ week: Week; sync: SyncResult }>(`${base}/weeks/${id}`, { method: 'PUT', body: fields });
+      const r = await api<{ week: Week; sync: SyncResult }>(`${base}/weeks/${id}`, { method: 'PUT', body: { ...fields, _base: sentBase } });
+      const server = pick(r.week);
+      // 다른 창에서 바뀐 칸 중 이 창에서 고치지 않은 칸은 새 값으로 보여 준다
+      const cur = draftRef.current!;
+      const adopt: Partial<Week> = {};
+      for (const k of EDITABLE) if (!keys.includes(k) && same(cur[k], baseRef.current![k]) && !same(cur[k], server[k])) (adopt as any)[k] = server[k];
+      baseRef.current = server;
+      if (Object.keys(adopt).length) { draftRef.current = { ...draftRef.current!, ...adopt }; setWeek(draftRef.current); }
       if (v === verRef.current) {
         try { localStorage.removeItem(pendingKey); } catch { /* 무시 */ }
         setSave({ state: 'saved', sync: r.sync });
-      }
+      } else setSave((s) => ({ ...s, state: 'dirty' }));
       loadStatus();
       reload();
     } catch (e: any) {
-      setSave({ state: 'error', msg: e.message });
+      if (e.status === 409 && e.data?.conflicts) setSave({ state: 'conflict', msg: e.message, conflicts: e.data.conflicts });
+      else setSave({ state: 'error', msg: e.message });
     }
   }, [base, id, pendingKey, loadStatus, reload]);
 
@@ -80,7 +103,16 @@ export default function WeekPage() {
     draftRef.current = next; verRef.current++;
     setWeek(next);
     setSave((s) => ({ ...s, state: 'dirty', restored: s.restored }));
-    try { localStorage.setItem(pendingKey, JSON.stringify({ at: Date.now(), fields: Object.fromEntries(EDITABLE.map((k) => [k, next[k]])) })); } catch { /* 무시 */ }
+    const keys = changedKeys(next);
+    try { localStorage.setItem(pendingKey, JSON.stringify({ at: Date.now(), fields: Object.fromEntries(keys.map((k) => [k, next[k]])), base: Object.fromEntries(keys.map((k) => [k, baseRef.current?.[k]])) })); } catch { /* 무시 */ }
+  };
+  // 다른 창과 부딪쳤을 때: 다른 창 내용 받기 / 내 입력으로 덮어쓰기
+  const resolve = (mine: boolean) => {
+    const cs = save.conflicts || [];
+    for (const c of cs) baseRef.current![c.field] = c.theirs;
+    if (!mine) { draftRef.current = { ...draftRef.current!, ...Object.fromEntries(cs.map((c) => [c.field, c.theirs])) }; setWeek(draftRef.current); }
+    verRef.current++;
+    setSave({ state: 'dirty' });
   };
   const replaceWeek = (w: Week) => { draftRef.current = { ...w, ...Object.fromEntries(EDITABLE.map((k) => [k, draftRef.current![k]])) }; setWeek(draftRef.current); };
 
@@ -98,6 +130,13 @@ export default function WeekPage() {
         <SaveBadge s={save} onRetry={doSave} />
       </div>
       {save.restored && <div className="alert info">저장되지 못했던 입력 내용을 되살렸습니다. 곧 자동으로 저장됩니다.</div>}
+      {save.state === 'conflict' && (
+        <div className="alert warn" role="alert">
+          <b>{save.msg}</b> 같은 예배를 다른 창(또는 다른 탭)에서도 열어 고친 것 같습니다. 이 창의 입력은 아직 저장하지 않았습니다.
+          <ul>{save.conflicts!.map((c) => <li key={c.field}>{c.label} — 다른 창의 내용: {Array.isArray(c.theirs) ? c.theirs.join(' / ') : String(c.theirs).slice(0, 120) || '(비어 있음)'}</li>)}</ul>
+          <div className="row wrap"><button onClick={() => resolve(false)}>다른 창 내용 받기</button><button className="primary" onClick={() => resolve(true)}>내 입력으로 덮어쓰기</button></div>
+        </div>
+      )}
       {save.state === 'error' && <div className="alert err"><b>저장하지 못했습니다.</b> {save.msg} 입력한 내용은 이 브라우저에 임시로 보관 중이며, 5초마다 다시 저장을 시도합니다. <button onClick={doSave}>지금 다시 저장</button></div>}
       {save.sync && !save.sync.ok && <div className="alert warn">라온 교회 올인원에는 저장했지만 예배송출에 반영하지 못했습니다: {save.sync.error} 예배송출이 켜지면 다음 저장 때 자동으로 반영됩니다.</div>}
       <nav className="tabs">
@@ -119,6 +158,7 @@ function SaveBadge({ s, onRetry }: { s: SaveState; onRetry: () => void }) {
   if (s.state === 'saving') return <span className="save saving">저장 중…</span>;
   if (s.state === 'dirty') return <span className="save dirty">입력 중…</span>;
   if (s.state === 'error') return <button className="save error" onClick={onRetry}>저장 실패 · 다시 시도</button>;
+  if (s.state === 'conflict') return <span className="save error">다른 창과 겹침 · 아래에서 골라 주세요</span>;
   const done = s.sync?.ok && s.sync.done?.length ? ` · 예배송출에 반영: ${s.sync.done.join(', ')}` : '';
   return <span className="save saved">✓ 저장됨{done}</span>;
 }

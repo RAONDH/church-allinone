@@ -19,7 +19,21 @@ export async function runApi() {
     { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true', win: { dir: path.join(appDir, 'nope'), run: ['node', '-e', '0'] } },
   ]));
   const ms = await fakeMusicSheet();
-  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base } });
+  // 가짜 제미나이 API: 받은 요청을 적어 두고, mode 가 '429' 면 사용 한도 오류를 돌려준다
+  const gem = { mode: 'ok', calls: [] };
+  const gemini = await fakeServer({ '*': (q, r) => {
+    let b = ''; q.on('data', (c) => (b += c)); q.on('end', () => {
+      gem.calls.push({ url: q.url, key: q.headers['x-goog-api-key'], body: JSON.parse(b || '{}') });
+      r.setHeader('Content-Type', 'application/json');
+      if (gem.mode === '429') { r.statusCode = 429; return r.end(JSON.stringify({ error: { code: 429, message: 'Resource has been exhausted (e.g. check quota).' } })); }
+      // 주보 꾸미기 요청이면 CSS 를 돌려준다 (위험한 설정을 일부러 섞어 걸러지는지 본다)
+      if (String(gem.calls.at(-1).body.systemInstruction?.parts?.[0]?.text || '').includes('주보 디자이너')) {
+        return r.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: '이렇게 꾸며 보았습니다.\n```css\n/* 이름: 초록 명조 */\n@import url(https://evil.example/x.css);\n:root{--a:#1d5c3a;--lh:3}\n.church{font-family:\'AppleMyungjo\',serif;color:var(--a)}\nh3{border-bottom:2px double #b8962e;background:url(https://evil.example/t.png)}\nsection[data-b="births"]{display:none}\n.tools{color:red}\n.sheet{position:fixed;font-size:9em}\n```' }] }, finishReason: 'STOP' }] }));
+      }
+      r.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: `# 주보용 설교 요약\n\n${'제미나이가 쓴 시험 요약 문장입니다. '.repeat(20)}` }] }, finishReason: 'STOP' }] }));
+    });
+  } });
+  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base, GEMINI_API_BASE: gemini.base } });
   const { get, post, put, del } = hub;
   const ctx = {};
   try {
@@ -65,6 +79,21 @@ export async function runApi() {
         ok(r.sync.skipped || r.sync.ok === false, '예배송출과 연결되지 않은 예배는 동기화를 건너뜀', r.sync);
         const w = (await get(`${R}/weeks/${ctx.week}`)).data.week;
         eq([w.passage, w.sermonTitle, w.announcements, w.sermonNotes], ['시편 23:1-6', '목자', ['광고 하나'], '짧은 원고'], '다시 읽은 예배 정보');
+      }],
+      ['두 창 충돌: 고친 칸만 저장해 다른 칸을 되돌리지 않고, 같은 칸을 다른 창이 먼저 바꿨으면 덮어쓰지 않고 알려 준다', async () => {
+        const W = `${R}/weeks/${ctx.week}`;
+        const w0 = (await get(W)).data.week;
+        expectStatus(await put(W, { sermonTitle: '첫 창 제목', _base: { sermonTitle: w0.sermonTitle } }), 200, '첫 창: 제목');
+        expectStatus(await put(W, { announcements: ['둘째 창 광고'], _base: { announcements: w0.announcements } }), 200, '둘째 창: 광고');
+        let w = (await get(W)).data.week;
+        eq([w.sermonTitle, w.announcements], ['첫 창 제목', ['둘째 창 광고']], '두 창에서 고친 칸이 모두 남음');
+        const c = await put(W, { sermonTitle: '둘째 창 제목', _base: { sermonTitle: w0.sermonTitle } });
+        eq(c.status, 409, '같은 칸을 옛 값 기준으로 고치면 충돌');
+        eq(c.data.conflicts?.map((x) => [x.field, x.label, x.theirs]), [['sermonTitle', '설교 제목', '첫 창 제목']], '충돌한 칸과 다른 창의 값');
+        eq((await get(W)).data.week.sermonTitle, '첫 창 제목', '충돌하면 덮어쓰지 않음');
+        expectStatus(await put(W, { sermonTitle: '둘째 창 제목', _base: { sermonTitle: '첫 창 제목' } }), 200, '새 값을 보고 다시 저장하면 됨');
+        expectStatus(await put(W, { sermonTitle: '둘째 창 제목', _base: { sermonTitle: '아주 옛 제목' } }), 200, '이미 같은 값이면 충돌 아님');
+        expectStatus(await put(W, { passage: '시편 23:1-6', sermonTitle: '목자', announcements: ['광고 하나'] }), 200, '_base 없이 보내면 예전처럼 저장');
       }],
       ['설교 후 자료: 실제 자료에서 원고가 300자보다 짧으면 만들지 않는다', async () => {
         const r = await post(`${R}/weeks/${ctx.week}/after/summary`, {});
@@ -346,9 +375,9 @@ export async function runApi() {
         const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
         const B = `${S}/weeks/${wk.id}/bulletin`;
         let e = expectStatus(await get(`${B}/blocks`), 200, '편집 창 자료');
-        eq(e.blocks.map((b) => b.id), ['order', 'sermon', 'summary', 'ann', 'serve', 'events', 'births', 'info'], '주보 칸');
+        eq(e.blocks.map((b) => b.id), ['order', 'sermon', 'summary', 'ann', 'photo', 'serve', 'events', 'births', 'info'], '주보 칸 (사진·포스터 칸은 그림을 넣을 때만 나옴)');
         eq(e.blocks.find((b) => b.id === 'ann').auto, (wk.announcements || []).join('\n'), '교회 소식 자동 내용 = 이번 주 광고');
-        eq(e.settings.layout.map((x) => `${x.id}:${x.col}${x.face}`).join(' '), 'order:L2 sermon:L2 summary:L3 ann:R3 serve:R4 events:R4 births:R4 info:R4', '처음 배치는 지금까지의 주보 모양');
+        eq(e.settings.layout.map((x) => `${x.id}:${x.col}${x.face}`).join(' '), 'order:L2 sermon:L2 summary:L3 ann:R3 photo:R3 serve:R4 events:R4 births:R4 info:R4', '처음 배치는 지금까지의 주보 모양 + 교회 소식 뒤에 사진 칸');
         const pos = (h, a, b) => h.indexOf(a) >= 0 && h.indexOf(b) >= 0 && h.indexOf(a) < h.indexOf(b);
         const faceOf = (h, t) => { const i = h.indexOf(`<h3>${t}</h3>`); const m = [...h.slice(0, i).matchAll(/<p class="fno">(\d)<\/p>/g)].pop(); return i < 0 ? null : m?.[1]; };
         // 교회 소식을 맨 앞·왼쪽·2면으로, 설교 요약 끄기
@@ -364,7 +393,7 @@ export async function runApi() {
         e = expectStatus(await put(`${B}/blocks`, { id: 'ann', text: '고친 광고 하나\n고친 광고 둘', size: 's' }), 200, '이번 주 글 저장');
         eq(e.blocks.find((b) => b.id === 'ann').text, '고친 광고 하나\n고친 광고 둘', '저장된 이번 주 글');
         h = (await get(`${B}?format=print`)).data;
-        ok(h.includes('<li>고친 광고 하나</li><li>고친 광고 둘</li>') && h.includes('<section class="sm"><h3>교회 소식</h3>'), '주보에 고친 글이 한 줄씩, 작은 글자로', h.slice(h.indexOf('교회 소식') - 30, h.indexOf('교회 소식') + 120));
+        ok(h.includes('<li>고친 광고 하나</li><li>고친 광고 둘</li>') && h.includes('<section data-b="ann" class="sm"><h3>교회 소식</h3>'), '주보에 고친 글이 한 줄씩, 작은 글자로', h.slice(h.indexOf('교회 소식') - 30, h.indexOf('교회 소식') + 120));
         for (const a of wk.announcements || []) ok(!h.includes(a) || ['고친 광고 하나', '고친 광고 둘'].includes(a), '원래 광고는 이번 주 주보에서 빠짐', a);
         eq((await get(`${S}/weeks/${wk.id}`)).data.week.announcements, wk.announcements, '원래 광고 자료는 그대로');
         await put(`${B}/blocks`, { id: 'order', text: '<b>태그</b>' });
@@ -451,6 +480,81 @@ export async function runApi() {
         has(open, '잠금시험봉사자', '잠금을 푼 쪽지로는 봉사자 이름이 보임');
         eq((await fx('PUT', `${R}/bulletin`, { showBirthdays: true })).status, 423, '잠긴 동안 주보 칸 바꾸기');
       }],
+      ['주보 분량·저장 전 미리보기(예제): 고치던 글을 저장하지 않고 미리보기에만 넣고, 주보는 단·면마다 분량을 재서 넘치면 몇 줄·어느 칸인지 알린다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const before = (await get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'ann').text;
+        const { token } = expectStatus(await post(`${B}/preview`, { id: 'ann', text: '미리보기 전용 광고' }), 200, '저장 전 글 맡기기');
+        ok(/^[a-f0-9]{24}$/.test(token), '미리보기 표', token);
+        has((await get(`${B}?format=print&preview=${token}`)).data, '미리보기 전용 광고', '표를 붙이면 고치던 글로 그림');
+        ok(!(await get(`${B}?format=print`)).data.includes('미리보기 전용 광고'), '표 없이 열면 저장된 주보 그대로');
+        ok(!(await get(`${R}/weeks/${ctx.week}/bulletin?preview=${token}`)).data.includes('미리보기 전용 광고'), '다른 작업 공간·예배에는 쓰지 않음');
+        eq((await get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'ann').text, before, '미리보기는 저장하지 않음');
+        expectStatus(await post(`${B}/preview`, { id: 'nope', text: 'x' }), 400, '없는 칸 거절');
+        expectStatus(await post(`${B}/preview`, { id: 'ann', text: 'x'.repeat(10001) }), 400, '너무 긴 글 거절');
+        const h = (await get(`${B}?format=fold4`)).data;
+        ok(h.includes('data-b="ann"') && h.includes("type:'bulletin-fit'"), '칸 표시와 분량 알림이 주보에 들어 있음');
+      }],
+      ['주보 확정본(예제): 확정하면 그때 주보를 세 모양 그대로 보관하고, 나중에 표어를 바꿔도 확정본은 그대로이며, 바뀌면 알리고 다시 확정하면 차수가 오른다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const settings = (await get(`${S}/bulletin`)).data;
+        eq(expectStatus(await get(`${B}/finals`), 200, '확정본 목록').finals, [], '처음에는 확정본 없음');
+        await put(`${S}/bulletin`, { ...settings, motto: '확정 때 표어' });
+        try {
+          let f = expectStatus(await post(`${B}/finals`, {}), 200, '주보 확정');
+          eq([f.finals.map((x) => x.v), f.changed], [[1], false], '1차 확정, 바뀐 것 없음');
+          for (const fmt of ['print', 'fold4', 'mobile']) has((await get(`${B}?final=1&format=${fmt}`)).data, '확정 때 표어', `확정본 ${fmt}`);
+          has((await get(`${B}?final=1&format=print`)).data, '확정본 1차', '화면에 확정본 표시');
+          await put(`${S}/bulletin`, { ...settings, motto: '나중 표어' });
+          const old = (await get(`${B}?final=1&format=print`)).data;
+          ok(old.includes('확정 때 표어') && !old.includes('나중 표어'), '표어를 바꿔도 확정본은 그대로');
+          has((await get(`${B}?format=print`)).data, '나중 표어', '지금 주보는 새 표어');
+          eq((await get(`${B}/finals`)).data.changed, true, '확정 뒤 바뀌면 알림');
+          f = expectStatus(await post(`${B}/finals`, {}), 200, '다시 확정');
+          eq([f.finals.map((x) => x.v), f.changed], [[2, 1], false], '2차 확정 (1차도 남음)');
+          ok((await get(`${B}?final=1&format=print`)).data.includes('확정 때 표어'), '1차 확정본도 그대로 열림');
+          expectStatus(await get(`${B}?final=99`), 404, '없는 차수');
+          for (let i = 0; i < 4; i++) await post(`${B}/finals`, {});
+          eq((await get(`${B}/finals`)).data.finals.map((x) => x.v), [6, 5, 4, 3, 2], '최근 5개만 보관');
+          expectStatus(await get(`${B}?final=1`), 404, '오래된 확정본은 지워짐');
+          ok(!JSON.stringify((await get(`${S}/weeks/${wk.id}`)).data).includes('확정 때 표어'), '예배 기록 응답에 확정본이 섞이지 않음');
+        } finally { await put(`${S}/bulletin`, settings); }
+      }],
+      ['주보 그림(예제): 교회 로고와 사진·포스터 칸을 넣으면 주보에 나오고, 그림 아닌 파일·큰 파일은 거절하며, 확정본은 그림을 한 번만 보관해도 그대로 열린다', async () => {
+        const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const settings = (await get(`${S}/bulletin`)).data;
+        expectStatus(await post(`${S}/bulletin/images`, { data: 'data:text/html;base64,PGI+' }), 400, '그림이 아닌 파일 거절');
+        expectStatus(await post(`${S}/bulletin/images`, { data: `data:image/png;base64,${Buffer.from('그림 아님').toString('base64')}` }), 400, '그림인 척하는 파일 거절');
+        expectStatus(await post(`${S}/bulletin/images`, { data: `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(900 * 1024)]).toString('base64')}` }), 400, '너무 큰 그림 거절');
+        const { id } = expectStatus(await post(`${S}/bulletin/images`, { data: PNG }), 200, '그림 올리기');
+        ok(/^[a-f0-9]{16}$/.test(id), '그림 번호', id);
+        eq(expectStatus(await post(`${S}/bulletin/images`, { data: PNG }), 200, '같은 그림 다시').id, id, '같은 그림은 같은 번호 (한 번만 보관)');
+        const raw = await fetch(`${hub.base}${S}/bulletin/images/${id}`);
+        eq([raw.status, raw.headers.get('content-type')], [200, 'image/png'], '그림 보기');
+        try {
+          await put(`${S}/bulletin`, { ...settings, logo: id });
+          has((await get(`${B}?format=print`)).data, `<img class="logo" src="${PNG}"`, '2단 주보 머리에 로고');
+          has((await get(`${B}?format=fold4`)).data, `<div class="cover"><img class="logo" src="${PNG}"`, '4면 표지에 로고');
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', img: '0123456789abcdef' }), 400, '올리지 않은 그림 번호 거절');
+          const e = expectStatus(await put(`${B}/blocks`, { id: 'photo', img: id, text: '추수감사 행사 사진' }), 200, '사진 칸 저장');
+          eq(e.blocks.find((b) => b.id === 'photo').img, id, '편집 창 자료의 사진 번호');
+          const h = (await get(`${B}?format=print`)).data;
+          ok(h.includes(`<section data-b="photo" data-t="사진·포스터" class="photo"><img src="${PNG}" alt="추수감사 행사 사진"><p class="cap">추수감사 행사 사진</p></section>`), '주보에 사진과 설명', h.slice(h.indexOf('data-b="photo"') - 20, h.indexOf('data-b="photo"') + 300));
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', img: id, text: '추수감사 행사 사진' }), 200, '같은 사진 다시 저장');
+          const fv = expectStatus(await post(`${B}/finals`, {}), 200, '사진이 든 주보 확정').finals[0].v;
+          const stored = JSON.parse(fs.readFileSync(path.join(hub.dataDir, 'sample.json'), 'utf8')).weeks[wk.id].bulletin.finals.at(-1).html.print;
+          ok(stored.includes(`allinone-img:${id}`) && !stored.includes('data:image'), '확정본에는 그림 자리표만 보관 (그림을 여러 번 넣지 않음)');
+          // 사진·로고를 빼도 확정본이 가리키는 그림은 남는다
+          await put(`${B}/blocks`, { id: 'photo', text: null });
+          await put(`${S}/bulletin`, settings);
+          ok(!(await get(`${B}?format=print`)).data.includes('data-b="photo"'), '사진을 빼면 주보에서 사진 칸이 사라짐');
+          has((await get(`${B}?final=${fv}&format=print`)).data, `src="${PNG}"`, '확정본에는 그 사진이 그대로');
+          eq((await fetch(`${hub.base}${S}/bulletin/images/${id}`)).status, 200, '확정본이 가리키는 그림은 지우지 않음');
+        } finally { await put(`${B}/blocks`, { id: 'photo', text: null }); await put(`${S}/bulletin`, settings); }
+      }],
       ['잠금 중 주보 편집: 봉사·일정·생일 칸은 자동 내용도 고친 글도 보이지 않고 고칠 수 없다 (광고는 고칠 수 있음)', async () => {
         const { fx } = ctx;
         const B = `${R}/weeks/${ctx.week}/bulletin`;
@@ -463,6 +567,14 @@ export async function runApi() {
         ok(!JSON.stringify((await fx('GET', `${R}/weeks/${ctx.week}`)).data).includes('고친 봉사') && !JSON.stringify((await fx('GET', R)).data).includes('고친 봉사'), '잠긴 동안 예배 기록·목록에도 고친 봉사 글이 없어야 함');
         eq((await fx('PUT', `${B}/blocks`, { id: 'serve', text: '몰래' })).status, 423, '잠긴 동안 봉사 칸 고치기');
         eq((await fx('PUT', `${B}/blocks`, { id: 'births', text: '몰래' })).status, 423, '잠긴 동안 생일 칸 고치기');
+        // 잠금을 푼 채 확정한 주보(봉사자 이름이 들어 있음)는 잠긴 동안 열 수 없다
+        await fx('PUT', `${B}/blocks`, { id: 'serve', text: '확정본 봉사 글' }, ctx.lockCookie);
+        const fv = (await fx('POST', `${B}/finals`, {}, ctx.lockCookie)).data.finals[0].v;
+        eq((await fx('GET', `${B}?final=${fv}&format=print`)).status, 423, '잠긴 동안 이름이 든 확정본 열기');
+        has(await (await fetch(`${hub.base}${B}?final=${fv}&format=print`, { headers: { Cookie: ctx.lockCookie } })).text(), '확정본 봉사 글', '잠금을 풀면 확정본이 열림');
+        ok(!JSON.stringify((await fx('GET', `${R}/weeks/${ctx.week}`)).data).includes('확정본 봉사 글'), '예배 기록 응답에 확정본이 섞이지 않음');
+        await fx('PUT', `${B}/blocks`, { id: 'serve', text: null }, ctx.lockCookie);
+        eq((await fx('POST', `${B}/preview`, { id: 'serve', text: '몰래 미리보기' })).status, 423, '잠긴 동안 봉사 칸 저장 전 미리보기');
         eq((await fx('PUT', `${B}/blocks`, { id: 'ann', text: '광고는 됨' })).status, 200, '잠긴 동안에도 광고 칸은 고칠 수 있음');
         await fx('PUT', `${B}/blocks`, { id: 'ann', text: null });
         await fx('PUT', `${B}/blocks`, { id: 'serve', text: null }, ctx.lockCookie);
@@ -521,9 +633,150 @@ export async function runApi() {
         eq((await get(R)).data.church.name, '시험교회', '실제 자료 교회 이름');
         expectStatus(await post(`${R}/reset`, {}), 400, '실제 자료는 되돌리기 거절');
       }],
+      ['제미나이 연결: API 키를 넣으면(PraiseFlow 설정과 함께, 키 값은 돌려주지 않음) 설교 후 자료를 제미나이로 만들고, 사용 한도에 걸리면 알아듣게 알린다', async () => {
+        const cfg = path.join(hub.dataDir, 'praiseflow-config.json');
+        fs.writeFileSync(cfg, JSON.stringify({ provider: 'claude', codexModel: '그대로 둘 값' }));
+        eq(expectStatus(await get('/api/ai?refresh'), 200, 'AI 상태').gemini.loggedIn, false, '키가 없으면 제미나이 연결 안 됨');
+        expectStatus(await put('/api/ai/gemini-key', { key: '짧은키' }), 400, '키 모양이 아니면 거절');
+        const KEY = 'AIzaSy-test_KEY.0123456789abcdefghijk';
+        const st = expectStatus(await put('/api/ai/gemini-key', { key: KEY }), 200, '키 저장');
+        eq(st.gemini.loggedIn, true, '키를 넣으면 제미나이 연결됨');
+        ok(!JSON.stringify(st).includes(KEY) && !JSON.stringify((await get('/api/ai')).data).includes(KEY), '키 값은 화면으로 돌려주지 않음');
+        const saved = JSON.parse(fs.readFileSync(cfg, 'utf8'));
+        eq([saved.apiKey, saved.provider, saved.codexModel], [KEY, 'claude', '그대로 둘 값'], 'PraiseFlow 설정에 키만 더하고 나머지는 그대로');
+        if (process.platform !== 'win32') eq((fs.statSync(cfg).mode & 0o777).toString(8), '600', '키 파일은 나만 읽기');
+        // 실제 교회 자료의 새 예배에 원고를 넣고 제미나이로 주보 요약 만들기
+        const wk = expectStatus(await post(`${R}/weeks`, { date: '2099-03-01', name: '주일 예배' }), 200, '예배 만들기').week;
+        await put(`${R}/weeks/${wk.id}`, { sermonTitle: '제미나이 시험 설교', sermonNotes: '제미나이 시험 원고 문장입니다. '.repeat(30) });
+        expectStatus(await post(`${R}/weeks/${wk.id}/after/summary`, { provider: 'gemini' }), 200, '제미나이로 만들기');
+        const done = await waitFor(async () => { const a = (await get(`${R}/weeks/${wk.id}/after`)).data; return a.docs.summary || a.errors.summary ? a : null; });
+        eq(done.errors.summary, undefined, '만들기 오류');
+        has(done.docs.summary.via, '제미나이', '제미나이로 만든 것으로 표시');
+        has((await get(`${R}/weeks/${wk.id}/after/summary/view`)).data, '제미나이가 쓴 시험 요약', '만든 글');
+        const c = gem.calls.at(-1);
+        eq(c.key, KEY, '머리글로 키를 보냄 (주소에 넣지 않음)');
+        ok(!c.url.includes(KEY) && c.url.includes(':generateContent'), '요청 주소', c.url);
+        ok(c.body.systemInstruction?.parts?.[0]?.text && c.body.contents?.[0]?.parts?.[0]?.text.includes('제미나이 시험 원고'), '지시문과 원고를 보냄');
+        // 사용 한도
+        gem.mode = '429';
+        try {
+          expectStatus(await post(`${R}/weeks/${wk.id}/after/blog`, { provider: 'gemini' }), 200, '한도 시험 만들기');
+          const e = await waitFor(async () => (await get(`${R}/weeks/${wk.id}/after`)).data.errors.blog);
+          has(e.message, '사용 한도', '한도 안내');
+        } finally { gem.mode = 'ok'; }
+        // 키 지우기
+        eq(expectStatus(await put('/api/ai/gemini-key', { key: '' }), 200, '키 지우기').gemini.loggedIn, false, '지우면 연결 안 됨');
+        eq(JSON.parse(fs.readFileSync(cfg, 'utf8')).apiKey, undefined, '설정 파일에서도 지워짐');
+      }],
+      ['주보 꾸미기: 기본 스타일을 고르면 세 모양 주보에 겉모양만 덧붙고, AI 스타일은 위험한 설정(바깥 주소·숨기기·자리 바꾸기)을 거른 뒤 미리보기·적용·내 스타일 저장이 된다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const v0 = expectStatus(await get(`${S}/bulletin/style`), 200, '꾸밈 목록');
+        eq(v0.themes.map((t) => t.id), ['basic', 'warm', 'classic', 'modern'], '기본 스타일 목록');
+        eq(v0.theme, 'basic', '처음에는 기본 모양');
+        const plain = (await get(`${B}?format=print`)).data;
+        ok(!plain.includes('주보 꾸미기'), '기본 모양에는 꾸밈을 덧붙이지 않음');
+        try {
+          // 미리보기: 저장하지 않고 고른 모양으로 그려 보기
+          const { token } = expectStatus(await post(`${S}/bulletin/style/preview`, { theme: 'classic' }), 200, '꾸밈 미리보기');
+          has((await get(`${B}?format=print&look=${token}`)).data, 'Nanum Myeongjo', '미리보기에 고전적인 스타일');
+          eq((await get(`${S}/bulletin/style`)).data.theme, 'basic', '미리보기는 저장하지 않음');
+          // 적용: 세 모양 모두 <style> 맨 끝에 덧붙음 (내용은 그대로)
+          expectStatus(await put(`${S}/bulletin/style`, { theme: 'warm' }), 200, '따뜻한 스타일 적용');
+          for (const f of ['print', 'fold4', 'mobile']) {
+            const h = (await get(`${B}?format=${f}`)).data;
+            ok(/\/\* 주보 꾸미기 \*\/\n:root\{--a:#9a4a1f[^<]*<\/style>/.test(h), `${f}: 꾸밈이 style 맨 끝에`);
+            eq(h.replace(/<style>[\s\S]*?<\/style>/, ''), (await get(`${B}?format=${f}&look=${(await post(`${S}/bulletin/style/preview`, { theme: 'basic' })).data.token}`)).data.replace(/<style>[\s\S]*?<\/style>/, ''), `${f}: 꾸밈을 바꿔도 내용은 그대로`);
+          }
+          eq((await get(`${S}/bulletin`)).data.theme, 'warm', '고정 정보에도 고른 스타일');
+          expectStatus(await put(`${S}/bulletin`, { ...(await get(`${S}/bulletin`)).data, motto: '꾸밈 시험 표어' }), 200, '고정 정보 저장');
+          eq((await get(`${S}/bulletin/style`)).data.theme, 'warm', '고정 정보를 저장해도 스타일은 그대로');
+          // 예제 자료의 AI: AI 를 부르지 않고 예시 스타일
+          const calls = gem.calls.length;
+          const sx = expectStatus(await post(`${S}/bulletin/style/ai`, { desc: '고풍스러운 명조체, 보라색' }), 200, '예제 AI 꾸밈');
+          eq([sx.sample, gem.calls.length], [true, calls], '예제는 AI를 부르지 않음');
+          ok(sx.css.includes('--a:#5b3d8a') && sx.css.includes('Myeongjo'), '설명에 맞는 예시 (명조·보라)', sx.css);
+          expectStatus(await post(`${S}/bulletin/style/ai`, { desc: '' }), 400, '설명 없으면 거절');
+          // 직접 넣은 CSS 도 걸러서 저장
+          const bad = expectStatus(await put(`${S}/bulletin/style`, { theme: 'custom', customCss: 'h3{color:red}.order{display:none}body{background:url(http://x/y)}</style><script>alert(1)</script>' }), 200, '직접 넣은 CSS');
+          eq(bad.customCss, 'h3{color:red}', '겉모양만 남김');
+          ok(!(await get(`${B}?format=print`)).data.includes('<script>alert'), '스크립트가 주보에 들어가지 않음');
+        } finally { await put(`${S}/bulletin/style`, { theme: 'basic', customCss: '', myStyles: [] }); }
+        // 실제 자료: 연결된 AI(가짜 제미나이)로 만들기 — 분위기 설명만 보내고 교회 자료는 보내지 않음
+        const cfg = path.join(hub.dataDir, 'praiseflow-config.json');
+        expectStatus(await put('/api/ai/gemini-key', { key: 'AIzaSy-style_KEY.0123456789abcdefghijk' }), 200, '키 저장');
+        try {
+          const church = (await get(R)).data.church.name;
+          const a = expectStatus(await post(`${R}/bulletin/style/ai`, { desc: '고풍스러운 명조체, 진한 초록', provider: 'gemini' }), 200, 'AI로 꾸밈 만들기');
+          const c = gem.calls.findLast((x) => String(x.body.systemInstruction?.parts?.[0]?.text).includes('주보 디자이너'));
+          ok(c.body.contents[0].parts[0].text.includes('고풍스러운 명조체') && !!church && !JSON.stringify(c.body).includes(church), 'AI에는 분위기 설명만 보냄', c.body.contents[0].parts[0].text);
+          eq(a.name, '초록 명조', 'AI가 붙인 이름');
+          has(a.via, '제미나이', '만든 AI');
+          eq(a.css, ":root{--a:#1d5c3a}\n.church{font-family:'AppleMyungjo',serif;color:var(--a)}\nh3{border-bottom:2px double #b8962e}", '위험한 설정을 거른 CSS');
+          ok(a.dropped >= 5, '거른 설정 수', a.dropped);
+          const wr = expectStatus(await post(`${R}/weeks`, { date: '2099-04-05', name: '주일 예배' }), 200, '예배 만들기').week;
+          const { token } = expectStatus(await post(`${R}/bulletin/style/preview`, { theme: 'custom', customCss: a.css }), 200, 'AI 꾸밈 미리보기');
+          has((await get(`${R}/weeks/${wr.id}/bulletin?format=fold4&look=${token}`)).data, 'border-bottom:2px double #b8962e', '미리보기');
+          expectStatus(await get(`${S}/weeks/${wk.id}/bulletin?format=print&look=${token}`), 200, '다른 자료의 미리보기 표');
+          ok(!(await get(`${S}/weeks/${wk.id}/bulletin?format=print&look=${token}`)).data.includes('#b8962e'), '실제 자료의 미리보기 표는 예제에 쓰이지 않음');
+          const sv = expectStatus(await put(`${R}/bulletin/style`, { theme: 'custom', customCss: a.css, customName: a.name, myStyles: [{ name: '초록 명조', css: a.css }] }), 200, '적용·내 스타일 저장');
+          eq([sv.theme, sv.customName, sv.myStyles.length], ['custom', '초록 명조', 1], '적용된 스타일');
+          has((await get(`${R}/weeks/${wr.id}/bulletin?format=print`)).data, '#1d5c3a', '주보에 적용됨');
+          eq(expectStatus(await put(`${R}/bulletin/style`, { theme: 'basic' }), 200, '기본으로 되돌리기').myStyles.length, 1, '되돌려도 내 스타일은 남음');
+          ok(!(await get(`${R}/weeks/${wr.id}/bulletin?format=print`)).data.includes('#1d5c3a'), '기본 모양으로 돌아감');
+        } finally {
+          await put(`${R}/bulletin/style`, { theme: 'basic', customCss: '', myStyles: [] });
+          await put('/api/ai/gemini-key', { key: '' });
+          ok(fs.existsSync(cfg), '설정 파일');
+        }
+      }],
+      ['자료 손상 복구: 자료 파일이 깨지면 빈 자료로 덮어쓰지 않고 저장을 멈춘 뒤, 고른 백업으로 되살린다', async () => {
+        const ext = tmpDir('broken-ext');
+        const good = (name, weeks) => JSON.stringify({ version: 1, church: { name }, weeks: Object.fromEntries(Array.from({ length: weeks }, (_, i) => [`w${i}`, { id: `w${i}` }])), members: {} });
+        const BROKEN = '{"version":1,"church":{"name":"깨진교회"},"weeks":{"a":';
+        const h2 = await startHub({ name: 'broken', prepare: (d) => {
+          fs.writeFileSync(path.join(d, 'real.json'), BROKEN);
+          fs.writeFileSync(path.join(d, 'sample.json'), '{깨진 예제');
+          fs.mkdirSync(path.join(d, 'backups'));
+          fs.writeFileSync(path.join(d, 'backups', 'real-2026-01-01.json'), good('옛교회', 1));
+          fs.writeFileSync(path.join(d, 'backups', 'real-2026-01-02.json'), '{깨짐');
+          fs.writeFileSync(path.join(d, 'backup.json'), JSON.stringify({ dir: ext }));
+          fs.mkdirSync(path.join(ext, '라온교회올인원-백업'));
+          fs.writeFileSync(path.join(ext, '라온교회올인원-백업', 'real-2026-01-03.json'), good('바깥교회', 2));
+        } });
+        try {
+          const ov = await h2.get(R);
+          eq(ov.status, 503, '깨진 자료를 빈 자료(처음 설정)처럼 보여 주지 않음');
+          ok(ov.data.broken?.kept?.startsWith('real.json.broken-'), '깨진 파일을 보관한 이름을 알려 줌', ov.data);
+          eq((await h2.put(`${R}/church`, { name: '새교회' })).status, 503, '깨진 동안 저장 거절');
+          eq(fs.readFileSync(path.join(h2.dataDir, 'real.json'), 'utf8'), BROKEN, '깨진 real.json 을 덮어쓰지 않음');
+          ok(fs.readdirSync(h2.dataDir).some((f) => f.startsWith('real.json.broken-')), '깨진 파일 보관본', fs.readdirSync(h2.dataDir));
+          ok(!fs.existsSync(path.join(ext, '라온교회올인원-백업', `real-${today}.json`)), '켤 때 깨진 파일을 바깥 백업으로 복사하지 않음');
+          ok((await h2.get(S)).data.church?.name, '예제 자료는 깨져도 다시 만들어 그대로 씀', (await h2.get(S)).data.church);
+
+          const rec = expectStatus(await h2.get('/api/recovery'), 200, '복구 후보 보기');
+          const find = (src, f) => rec.list.find((c) => c.source === src && c.file === f);
+          eq(find('local', 'real-2026-01-01.json')?.church, '옛교회', '이 컴퓨터 자동 백업과 그 안의 교회 이름');
+          eq(find('local', 'real-2026-01-02.json')?.ok, false, '깨진 백업은 고를 수 없다고 표시');
+          eq(find('external', 'real-2026-01-03.json')?.weeks, 2, '바깥 백업 폴더의 백업과 예배 수');
+          expectStatus(await h2.post('/api/recovery/restore', { source: 'local', file: 'real-2026-01-02.json' }), 400, '깨진 백업으로 되살리기 거절');
+          expectStatus(await h2.post('/api/recovery/restore', { source: 'external', file: '../real.json' }), 404, '백업 폴더 밖 파일 거절');
+          expectStatus(await h2.post('/api/recovery/fresh', { confirm: '' }), 400, '확인 글자 없이 새로 시작 거절');
+
+          const r = expectStatus(await h2.post('/api/recovery/restore', { source: 'external', file: 'real-2026-01-03.json' }), 200, '바깥 백업으로 되살리기');
+          eq(r.church, '바깥교회', '되살린 교회 이름');
+          eq(expectStatus(await h2.get(R), 200, '되살린 뒤 자료 열기').church.name, '바깥교회', '되살린 뒤 교회 이름');
+          expectStatus(await h2.put(`${R}/church`, { name: '바깥교회2' }), 200, '되살린 뒤 저장 다시 됨');
+          eq(JSON.parse(fs.readFileSync(path.join(h2.dataDir, 'real.json'), 'utf8')).church.name, '바깥교회2', '저장된 파일');
+          ok(!fs.readdirSync(path.join(h2.dataDir, 'backups')).some((f) => f.startsWith('before-restore-')), '깨진 파일을 되살리기 직전 자료로 백업 목록에 넣지 않음');
+          eq(fs.readFileSync(path.join(h2.dataDir, 'backups', 'real-2026-01-01.json'), 'utf8'), good('옛교회', 1), '옛 자동 백업은 그대로');
+          expectStatus(await h2.post('/api/recovery/restore', { source: 'local', file: 'real-2026-01-01.json' }), 409, '멀쩡해진 뒤에는 복구 주소로 되돌리지 않음');
+          eq((await h2.get('/api/recovery')).data.broken, null, '복구 상태 풀림');
+        } finally { await h2.stop(); fs.rmSync(ext, { recursive: true, force: true }); }
+      }],
     ]);
   } finally {
-    await hub.stop(); await gh.close(); await fakeApp.close(); await ms.close();
+    await hub.stop(); await gh.close(); await fakeApp.close(); await ms.close(); await gemini.close();
     fs.rmSync(appDir, { recursive: true, force: true });
   }
 }

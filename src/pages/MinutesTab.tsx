@@ -1,6 +1,7 @@
 // 회의록 + 회의록 작성기 (녹음·녹음 파일 → 녹취 → AI 정리: 내용 정리 · 결정 사항 · 해야 할 일 · 전체 녹취록)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../App';
+import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Minutes } from '../lib/types';
 import { fmtDate, fmtTime, ymd } from '../lib/week';
@@ -150,7 +151,7 @@ function MinutesView({ m, st, church, onClose, onEdit, reload }: { m: Minutes; s
               <button className="primary" onClick={() => window.print()}>인쇄</button>
             </div>
           </div>
-          {m.transcript?.trim() && <p className="muted small">AI로 정리하면 녹취록 글이 로그인된 AI 구독(Claude·ChatGPT)으로 보내집니다. 녹음 파일은 보내지 않습니다.</p>}
+          {m.transcript?.trim() && <p className="muted small">AI로 정리하면 녹취록 글이 연결된 AI(Claude·ChatGPT 구독 또는 제미나이 API 키)로 보내집니다. 녹음 파일은 보내지 않습니다.</p>}
         </div>
       </div>
       <div className="print-area"><MinutesDoc m={m} church={church} withTranscript={withTranscript} print /></div>
@@ -183,6 +184,7 @@ export function MinutesDoc({ m, church, withTranscript = false, print = false }:
 }
 
 function MinutesDialog({ m, types, onClose, reload, init }: { m: Minutes | null; types: string[]; onClose: () => void; reload: () => Promise<void>; init?: Partial<Minutes> }) {
+  const g = useGuardedClose(onClose);
   const { base, ov } = useApp();
   const [f, setF] = useState({
     date: m?.date || ymd(new Date()), meeting: m?.meeting || types[0] || '회의', title: m?.title || '', place: m?.place || '', attendees: m?.attendees || '',
@@ -199,8 +201,8 @@ function MinutesDialog({ m, types, onClose, reload, init }: { m: Minutes | null;
     try { await api(`${base}/minutes/${m.id}`, { method: 'DELETE' }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
   };
   return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
+    <div className="dialog-back" onClick={g.close}>
+      <div {...g.track} className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>{m ? '회의록 고치기' : '회의록 쓰기'}</h2>
         <datalist id="meetings">{types.map((x) => <option key={x} value={x} />)}</datalist>
         <div className="form-grid">
@@ -219,7 +221,7 @@ function MinutesDialog({ m, types, onClose, reload, init }: { m: Minutes | null;
         {err && <p className="alert err">{err}</p>}
         <div className="row between">
           {m ? <button className="danger-link" onClick={remove}>회의록 지우기</button> : <span />}
-          <div className="row"><button onClick={onClose}>취소</button><button className="primary" onClick={save}>저장</button></div>
+          <div className="row"><button onClick={g.close}>취소</button><button className="primary" onClick={save}>저장</button></div>
         </div>
       </div>
     </div>
@@ -377,7 +379,7 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
               <button className="rec-choice" onClick={() => setMode('paste')}><span>📝</span><b>녹취록 글 붙여 넣기</b><small>클로바노트 등에서 받은 글</small></button>
             </div>
             <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />녹취가 끝나면 AI로 바로 정리 (내용 정리 · 결정 사항 · 해야 할 일)</label>
-            <p className="muted small">녹음과 녹취(받아 적기)는 이 컴퓨터 안에서만 합니다. AI로 정리할 때만 녹취록 글이 로그인된 AI 구독(Claude·ChatGPT)으로 보내집니다.</p>
+            <p className="muted small">녹음과 녹취(받아 적기)는 이 컴퓨터 안에서만 합니다. AI로 정리할 때만 녹취록 글이 연결된 AI(Claude·ChatGPT 구독 또는 제미나이 API 키)로 보내집니다.</p>
           </>
         )}
         {mode === 'recording' && (

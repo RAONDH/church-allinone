@@ -55,17 +55,21 @@ export async function fakeServer(routes) {
 export const json = (obj) => (req, res) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(typeof obj === 'function' ? obj() : obj)); };
 
 /** 시험용 라온 교회 올인원 서버: 임시 자료 폴더, 다른 포트, 바깥 연결은 모두 가짜·닫힌 포트로 */
-export async function startHub({ env = {}, name = 'hub' } = {}) {
+/** prepare(dataDir): 서버를 켜기 전에 자료 폴더를 꾸민다 (깨진 자료 파일·옛 백업 등) */
+export async function startHub({ env = {}, name = 'hub', prepare } = {}) {
   const port = await freePort();
   const closed = await freePort();   // 아무도 듣지 않는 포트 (예배송출·PraiseFlow 자리)
   const dataDir = tmpDir(`${name}-data`), logDir = tmpDir(`${name}-log`), sttDir = tmpDir(`${name}-stt`);
   const fullEnv = {
     ...process.env, PORT: String(port), HUB_DATA_DIR: dataDir, HUB_LOG_DIR: logDir, STT_DIR: sttDir,
     WC_URL: `http://127.0.0.1:${closed}`, PRAISEFLOW_URL: `http://127.0.0.1:${closed}`,
+    // 제미나이 키·PraiseFlow 설정은 사용자의 실제 파일(~/.praiseflow) 대신 임시 파일, 제미나이 서버는 닫힌 포트
+    PRAISEFLOW_CONFIG: path.join(dataDir, 'praiseflow-config.json'), GEMINI_API_BASE: `http://127.0.0.1:${closed}`,
     UPDATE_LATEST_URL: `http://127.0.0.1:${closed}/latest`, UPDATE_ALLOWED_PREFIX: `http://127.0.0.1:${closed}/releases/download/`,
     ...env,
   };
-  delete fullEnv.HUB_APP_ROOT; delete fullEnv.BUNDLE_DIR;
+  delete fullEnv.HUB_APP_ROOT; delete fullEnv.BUNDLE_DIR; if (!env.GEMINI_API_KEY) delete fullEnv.GEMINI_API_KEY;
+  if (prepare) await prepare(dataDir);
   const out = [];
   const child = spawn(process.execPath, [path.join(HUB, 'server', 'index.mjs')], { cwd: HUB, env: fullEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (c) => out.push(String(c))); child.stderr.on('data', (c) => out.push(String(c)));
