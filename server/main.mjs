@@ -20,7 +20,7 @@ import { bootingFile } from './boot.mjs';
 import { makeBackups } from './backup.mjs';
 import { makeLock, areaOf } from './lock.mjs';
 import { cleanCss, cleanStyleSettings, composeStyle, COMBO_PARTS, COMBO_DEFAULT, THEMES, STYLE_SYSTEM, stylePrompt, extractCss, sampleStyle } from './bulletinStyle.mjs';
-import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS, cleanImage, fillImages, pruneImages } from './bulletin.mjs';
+import { bulletinData, bulletinHtml, cleanBulletinSettings, cleanWeekBlock, blockText, BLOCKS, PRIVATE_BLOCKS, BULLETIN_DEFAULTS, cleanImage, fillImages, pruneImages, photoIds } from './bulletin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = (() => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { return '0.0.0'; } })();
@@ -586,12 +586,14 @@ async function api(req, res, url) {
     const w = getWeek(sp, q[1]);
     if (req.method === 'PUT') {
       const b = await body(req);
+      // 예전 방식(img 한 장만 보냄)도 사진 목록으로 알아듣는다
+      if (b?.id === 'photo' && Object.hasOwn(b, 'img') && !Object.hasOwn(b, 'imgs')) b.imgs = b.img ? [b.img] : [];
       const v = await wrapB(() => cleanWeekBlock(b));
       if (!v) throw new HttpError(400, '없는 주보 칸입니다.');
       // 성도·행정 정보가 든 칸은 잠금을 풀어야 고칠 수 있다
       if (r[1] === 'real' && PRIVATE_BLOCKS[b.id]) for (const a of PRIVATE_BLOCKS[b.id]) await wrapB(() => lock.guard(db, req, a));
       const blocks = ((w.bulletin ||= {}).blocks ||= {});
-      if (v.img && !db.bulletinImages?.[v.img]) throw new HttpError(400, '그림을 먼저 올려 주세요.');
+      if (photoIds(v).some((id) => !db.bulletinImages?.[id])) throw new HttpError(400, '그림을 먼저 올려 주세요.');
       if (Object.keys(v).length) blocks[b.id] = v; else delete blocks[b.id];
       pruneImages(db);
       w.updatedAt = Date.now();
@@ -604,7 +606,7 @@ async function api(req, res, url) {
       blocks: BLOCKS.map(([id, title]) => {
         const locked = (PRIVATE_BLOCKS[id] || []).some((a) => hide[a]);
         const o = locked ? {} : w.bulletin?.blocks?.[id] || {};
-        return { id, title, locked, auto: locked ? '' : blockText(d, id), text: typeof o.text === 'string' ? o.text : null, size: o.size === 's' ? 's' : 'n', ...(id === 'photo' ? { img: o.img || null } : {}) };
+        return { id, title, locked, auto: locked ? '' : blockText(d, id), text: typeof o.text === 'string' ? o.text : null, size: o.size === 's' ? 's' : 'n', ...(id === 'photo' ? { img: o.img || null, imgs: photoIds(o) } : {}) };
       }),
     });
   }

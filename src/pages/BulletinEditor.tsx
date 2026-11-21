@@ -12,7 +12,9 @@ export type BlockSize = 's' | 'n' | 'l' | 'xl';
 export interface LayoutItem { id: string; on: boolean; col: 'L' | 'R'; face: 2 | 3 | 4; size: BlockSize }
 const SIZE_NAMES: [BlockSize, string][] = [['s', '작게'], ['n', '보통'], ['l', '크게'], ['xl', '아주 크게']];
 interface Rect { x: number; y: number; w: number; h: number }
-interface Block { id: string; title: string; locked: boolean; auto: string; text: string | null; size: 'n' | 's'; img?: string | null }
+interface Block { id: string; title: string; locked: boolean; auto: string; text: string | null; size: 'n' | 's'; img?: string | null; imgs?: string[] }
+const PHOTO_MAX = 6;   // server/bulletin.mjs 의 PHOTO_MAX 와 같게
+const photoIds = (b?: Block) => (b?.imgs?.length ? b.imgs : b?.img ? [b.img] : []);
 interface Settings { layout: LayoutItem[]; [k: string]: any }
 type Fmt = 'print' | 'fold4';
 /** 주보 화면이 재서 알려 주는 단·면마다의 분량 (server/bulletin.mjs 의 fitScript) */
@@ -71,7 +73,7 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
     if (!editing || !dirty || draft.length > MAX) { setTok(''); return; }
     const b = blocks.find((x) => x.id === editing);
     const t = setTimeout(() => {
-      api<{ token: string }>(`${base}/weeks/${week.id}/bulletin/preview`, { method: 'POST', body: { id: editing, text: draft, size: b?.size, img: b?.img } })
+      api<{ token: string }>(`${base}/weeks/${week.id}/bulletin/preview`, { method: 'POST', body: { id: editing, text: draft, size: b?.size, img: b?.img, imgs: b?.imgs } })
         .then((r) => setTok(r.token)).catch(() => setTok(''));
     }, 600);
     return () => clearTimeout(t);
@@ -80,15 +82,26 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
 
   // 사진·포스터 칸: 크기를 줄여 올리고 이번 주 주보에 넣는다 (설명 글은 아래 글 칸)
   const [photoBusy, setPhotoBusy] = useState(false);
-  const upPhoto = async (file: File) => {
+  // 여러 장을 한 번에 골라도 된다 (최대 PHOTO_MAX장). 고른 순서대로 뒤에 붙인다
+  const upPhotos = async (files: File[]) => {
+    const now = photoIds(blocks.find((x) => x.id === 'photo'));
+    const take = files.slice(0, Math.max(0, PHOTO_MAX - now.length));
+    if (!take.length) { setErr(`사진은 ${PHOTO_MAX}장까지 넣을 수 있습니다.`); return; }
     setPhotoBusy(true); setErr(''); setMsg('');
     try {
-      const data = await shrinkImage(file, { maxSide: 1400, maxBytes: 600 * 1024 });
-      const r = await api<{ id: string }>(`${base}/bulletin/images`, { method: 'POST', body: { data } });
-      if (await saveBlock('photo', { img: r.id })) setMsg('사진을 이번 주 주보에 넣었습니다. 자리와 순서는 왼쪽 목록에서 바꿀 수 있습니다.');
+      const ids: string[] = [];
+      for (const f of take) {
+        const data = await shrinkImage(f, { maxSide: 1400, maxBytes: 600 * 1024 });
+        ids.push((await api<{ id: string }>(`${base}/bulletin/images`, { method: 'POST', body: { data } })).id);
+      }
+      if (await saveBlock('photo', { imgs: [...now, ...ids] })) {
+        const left = files.length - take.length;
+        setMsg(`${ids.length > 1 ? `사진 ${ids.length}장을` : '사진을'} 이번 주 주보에 넣었습니다. 자리와 순서는 왼쪽 목록이나 미리보기에서 바꿀 수 있습니다.${left ? ` (${PHOTO_MAX}장까지라 ${left}장은 넣지 않았습니다)` : ''}`);
+      }
     } catch (e: any) { setErr(e.message); }
     setPhotoBusy(false);
   };
+  const setPhotos = async (imgs: string[], done: string) => { if (await saveBlock('photo', { imgs })) setMsg(done); };
 
   const saveLayout = async (layout: LayoutItem[]) => {
     if (!s) return;
@@ -97,10 +110,10 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
     try { await api(`${base}/bulletin`, { method: 'PUT', body: { ...s, ...flags, layout } }); await load(); setMsg('배치를 저장했습니다. 다음 주에도 이 배치를 씁니다.'); }
     catch (e: any) { setErr(e.message); }
   };
-  const saveBlock = async (id: string, body: { text?: string | null; size?: 'n' | 's'; img?: string | null }) => {
+  const saveBlock = async (id: string, body: { text?: string | null; size?: 'n' | 's'; img?: string | null; imgs?: string[] }) => {
     setErr(''); setMsg('');
     const b = blocks.find((x) => x.id === id)!;
-    const next = { id, text: body.text !== undefined ? body.text : b.text, size: body.size || b.size, img: body.img !== undefined ? body.img : b.img };
+    const next = { id, text: body.text !== undefined ? body.text : b.text, size: body.size || b.size, img: body.img !== undefined ? body.img : b.img, imgs: body.imgs !== undefined ? body.imgs : photoIds(b) };
     try { show(await api(path, { method: 'PUT', body: next })); setMsg(next.text === null && body.text === null ? `‘${b.title}’을 자동 내용으로 되돌렸습니다.` : `‘${b.title}’을 이 예배 주보에 저장했습니다.`); return true; }
     catch (e: any) { setErr(e.message); return false; }
   };
@@ -197,10 +210,22 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
                   <div className="bul-text">
                     {it.id === 'photo' && (
                       <div className="bul-photo">
-                        {b.img ? <img src={`${base}/bulletin/images/${b.img}`} alt="이번 주 사진" /> : <p className="muted small">교회 행사 사진이나 포스터를 한 장 넣을 수 있습니다. 크기를 줄여 저장합니다.</p>}
+                        {photoIds(b).length ? (
+                          <div className="bul-photos">
+                            {photoIds(b).map((id, i, all) => (
+                              <figure key={id}>
+                                <img src={`${base}/bulletin/images/${id}`} alt={`이번 주 사진 ${i + 1}`} />
+                                <div className="row" style={{ gap: 4 }}>
+                                  <button className="small" aria-label={`사진 ${i + 1} 앞으로`} disabled={i === 0} onClick={() => { const n = [...all]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; setPhotos(n, '사진 순서를 바꿨습니다.'); }}>←</button>
+                                  <button className="small" aria-label={`사진 ${i + 1} 뒤로`} disabled={i === all.length - 1} onClick={() => { const n = [...all]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; setPhotos(n, '사진 순서를 바꿨습니다.'); }}>→</button>
+                                  <button className="small" onClick={() => setPhotos(all.filter((x) => x !== id), '사진을 뺐습니다.')}>사진 빼기</button>
+                                </div>
+                              </figure>
+                            ))}
+                          </div>
+                        ) : <p className="muted small">교회 행사 사진이나 포스터를 넣을 수 있습니다. 한 번에 여러 장을 골라도 되고, {PHOTO_MAX}장까지 넣습니다. 크기를 줄여 저장합니다.</p>}
                         <div className="row wrap">
-                          <label className="btn small">{photoBusy ? '줄이는 중…' : b.img ? '사진 바꾸기' : '사진 고르기'}<input type="file" hidden accept="image/*" aria-label="주보 사진 파일" disabled={photoBusy} onChange={(e) => { const x = e.target.files?.[0]; if (x) upPhoto(x); e.target.value = ''; }} /></label>
-                          {b.img && <button className="small" onClick={async () => { if (await saveBlock('photo', { img: null })) setMsg('사진을 뺐습니다.'); }}>사진 빼기</button>}
+                          <label className="btn small">{photoBusy ? '줄이는 중…' : photoIds(b).length ? `사진 더하기 (${photoIds(b).length}/${PHOTO_MAX})` : '사진 고르기'}<input type="file" hidden multiple accept="image/*" aria-label="주보 사진 파일" disabled={photoBusy || photoIds(b).length >= PHOTO_MAX} onChange={(e) => { const x = [...(e.target.files || [])]; if (x.length) upPhotos(x); e.target.value = ''; }} /></label>
                         </div>
                         <p className="muted small">아래는 사진 설명입니다 (비워도 됩니다).</p>
                       </div>

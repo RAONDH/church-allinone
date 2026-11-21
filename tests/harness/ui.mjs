@@ -766,6 +766,36 @@ export async function runUi() {
         await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
         noErrors('주보 사진');
       }],
+      ['주보 사진 여러 장(예제): 사진·포스터 칸에서 사진 세 장을 한 번에 고르면 모두 들어가 미리보기에 격자로 나오고, ← 로 순서를 바꾸고 한 장만 뺄 수 있다', async () => {
+        const wk = await sampleWeek();
+        const B = `/api/ws/sample/weeks/${wk}/bulletin`;
+        // 화면이 사진을 줄여 다시 저장하므로, 색이 서로 다른 사진 세 장을 만든다
+        const datas = await page.evaluate(() => ['#c0392b', '#2e86c1', '#27ae60'].map((c) => { const k = document.createElement('canvas'); k.width = 40; k.height = 30; const g = k.getContext('2d'); g.fillStyle = c; g.fillRect(0, 0, 40, 30); return k.toDataURL('image/png'); }));
+        const pngs = datas.map((d, i) => { const f = path.join(files, `여러장${i + 1}.png`); fs.writeFileSync(f, Buffer.from(d.split(',')[1], 'base64')); return f; });
+        try {
+          await go(`/week/${wk}/outputs?ws=sample`);
+          await clickText('주보 편집 (배치·글 고치기)');
+          await waitText('주보 편집 ·');
+          await page.evaluate(() => [...document.querySelectorAll('.bul-blocks li')].find((li) => li.innerText.includes('사진·포스터'))?.querySelector('button:last-of-type')?.click());
+          const input = await page.waitForSelector('input[aria-label="주보 사진 파일"]');
+          await input.uploadFile(...pngs);
+          await waitText('사진 3장을 이번 주 주보에 넣었습니다', 15000);
+          const first = (await hub.get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'photo').imgs;
+          eq(first.length, 3, '세 장 저장');
+          await page.waitForFunction(() => document.querySelector('iframe[title="주보 미리보기"]')?.contentDocument?.querySelectorAll('section.photo .pics img').length === 3, { timeout: 15000 })
+            .catch(() => { throw new Error('미리보기에 사진 세 장이 격자로 나오지 않았습니다'); });
+          eq(await page.$$eval('.bul-photos img', (x) => x.length), 3, '편집 창에 세 장 작게 보임');
+          await page.click('button[aria-label="사진 2 앞으로"]');
+          await waitText('사진 순서를 바꿨습니다');
+          eq((await hub.get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'photo').imgs, [first[1], first[0], first[2]], '2번 사진이 맨 앞으로');
+          await clickText('사진 빼기', '.bul-photos button');
+          await waitText('사진을 뺐습니다');
+          eq((await hub.get(`${B}/blocks`)).data.blocks.find((b) => b.id === 'photo').imgs, [first[0], first[2]], '맨 앞 한 장만 빠짐');
+          await clickText('닫기', '.dialog button');
+          await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        } finally { await hub.put(`${B}/blocks`, { id: 'photo', img: null }); }
+        noErrors('주보 사진 여러 장');
+      }],
       ['잠금: 설정에서 켜고 🔒 잠그기를 누르면 성도·재정이 잠금 화면이 되고, 암호를 넣으면 열린다', async () => {
         await go('/settings?ws=real');
         await waitText('잠금 (성도·재정·행정)');

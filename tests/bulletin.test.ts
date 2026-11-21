@@ -37,4 +37,11 @@ describe('주보 그림 정리', () => {
     pruneImages(db);
     expect(Object.keys(db.bulletinImages).sort()).toEqual(['a'.repeat(16), 'b'.repeat(16), 'd'.repeat(16)]);
   });
+  it('사진·포스터 칸에 넣은 여러 장은 모두 지우지 않는다 (예전 자료의 한 장도)', async () => {
+    const { pruneImages } = await import('../server/bulletin.mjs');
+    const old = Date.now() - 2 * 3600e3, id = (c: string) => c.repeat(16);
+    const db: any = { bulletin: {}, weeks: { w1: { bulletin: { blocks: { photo: { img: id('a'), imgs: [id('a'), id('b'), id('c')] } } } }, w2: { bulletin: { blocks: { photo: { img: id('d') } } } } }, bulletinImages: Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((c) => [id(c), { at: old }])) };
+    pruneImages(db);
+    expect(Object.keys(db.bulletinImages).sort()).toEqual(['a', 'b', 'c', 'd'].map(id));
+  });
 });

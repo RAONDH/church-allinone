@@ -614,6 +614,42 @@ export async function runApi() {
           ok(!(await get(`${B}?final=${fv}&format=print&edit=1`)).data.includes('bulletin-move'), '확정본에는 편집 도구가 없음');
         } finally { await put(`${S}/bulletin`, settings); }
       }],
+      ['주보 사진 여러 장(예제): 사진·포스터 칸에 여러 장을 순서대로 넣으면 주보에 격자로 나오고, 6장까지만 받으며, 순서 바꾸기·한 장 빼기·예전 방식(한 장)도 되고, 확정본에는 그때 사진이 모두 남는다', async () => {
+        const one = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+        const mk = (i) => `data:image/png;base64,${Buffer.concat([one, Buffer.from([i])]).toString('base64')}`;
+        const ids = [];
+        for (let i = 0; i < 8; i++) ids.push(expectStatus(await post(`${S}/bulletin/images`, { data: mk(i) }), 200, `사진 ${i + 1} 올리기`).id);
+        eq(new Set(ids).size, 8, '서로 다른 사진 8장');
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const photo = async () => (await get(`${B}/blocks`)).data.blocks.find((x) => x.id === 'photo');
+        const photoHtml = async (f = 'print') => { const h = (await get(`${B}?format=${f}`)).data; return (h.match(/<section data-b="photo"[\s\S]*?<\/section>/) || [''])[0]; };
+        try {
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', imgs: ids.slice(0, 3), text: '가을 소풍' }), 200, '세 장 저장');
+          let p = await photo();
+          eq([p.imgs, p.img], [ids.slice(0, 3), ids[0]], '세 장이 고른 순서대로, 첫 장은 img');
+          let h = await photoHtml();
+          has(h, '<div class="pics odd">', '세 장은 격자(첫 장 넓게)');
+          eq((h.match(/<img /g) || []).length, 3, '주보에 세 장');
+          has(h, '가을 소풍', '설명 글도 함께');
+          eq((await photoHtml('fold4')).match(/<img /g)?.length, 3, '4면에도 세 장');
+          eq((await photoHtml('mobile')).match(/<img /g)?.length, 3, '휴대폰에도 세 장');
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', imgs: [...ids, ids[0]], text: '가을 소풍' }), 200, '8장 보내기');
+          eq((await photo()).imgs, ids.slice(0, 6), '6장까지만 받고 같은 사진은 한 번');
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', imgs: [ids[2], ids[0]], text: '가을 소풍', _base: { text: '가을 소풍', size: 'n', img: ids[0], imgs: ids.slice(0, 6) } }), 200, '순서 바꾸고 줄이기');
+          p = await photo();
+          eq([p.imgs, p.text], [[ids[2], ids[0]], '가을 소풍'], '순서·줄인 사진 저장, 설명 글도 함께');
+          has(await photoHtml(), '<div class="pics">', '두 장은 나란히');
+          const fv = expectStatus(await post(`${B}/finals`, {}), 200, '사진 두 장 주보 확정').finals[0].v;
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', img: ids[5] }), 200, '예전 방식 한 장');
+          eq((await photo()).imgs, [ids[5]], '예전 방식(img 한 장)은 그 한 장으로');
+          const fh = (await get(`${B}?final=${fv}&format=print`)).data;
+          ok(fh.includes(mk(2)) && fh.includes(mk(0)), '확정본에는 그때 사진 두 장이 그대로');
+          expectStatus(await put(`${B}/blocks`, { id: 'photo', img: null }), 200, '사진 모두 빼기');
+          eq((await photo()).imgs, [], '모두 빼면 사진 없음');
+          eq(expectStatus(await put(`${B}/blocks`, { id: 'photo', imgs: ['0123456789abcdef'] }), 400, '없는 그림').error, '그림을 먼저 올려 주세요.', '올리지 않은 그림은 거절');
+        } finally { await put(`${B}/blocks`, { id: 'photo', img: null, text: null }); }
+      }],
       ['잠금 중 주보 편집: 봉사·일정·생일 칸은 자동 내용도 고친 글도 보이지 않고 고칠 수 없다 (광고는 고칠 수 있음)', async () => {
         const { fx } = ctx;
         const B = `${R}/weeks/${ctx.week}/bulletin`;
