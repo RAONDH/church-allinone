@@ -5,6 +5,8 @@ import { useGuardedClose } from '../lib/guard';
 import { api } from '../lib/api';
 import type { SyncResult, Week, WeekStatus } from '../lib/types';
 import { CareCard } from './People';
+import BulletinEditor from './BulletinEditor';
+import BulletinStyle from './BulletinStyle';
 import { fmtDate, nextStep, prepSteps, splitWeeks, type Step } from '../lib/week';
 
 export function StepList({ steps, onGo }: { steps: Step[]; onGo?: (s: Step) => void }) {
@@ -80,6 +82,7 @@ export default function Home() {
   const nav = useNavigate();
   const [status, setStatus] = useState<Record<string, WeekStatus>>({});
   const [dialog, setDialog] = useState<null | 'new' | 'copy'>(null);
+  const [bul, setBul] = useState<null | 'edit' | 'style'>(null);   // 이번 주 주보를 준비함에서 바로 고치기
   const weeks = ov!.weeks;
   const { sun, thisWeek, primary, previous, upcoming } = splitWeeks(weeks);
 
@@ -104,6 +107,7 @@ export default function Home() {
           <button onClick={() => setDialog('new')}>이번 주 예배 만들기</button>
           <button className="primary" disabled={!primary} onClick={() => nav(`/week/${primary!.id}/${next?.tab || 'info'}`)}>준비 이어하기</button>
           <button disabled={!primary} onClick={() => nav(`/week/${primary!.id}/outputs`)}>결과물 확인</button>
+          <button disabled={!primary} title={primary ? '' : '이번 주 예배를 먼저 만들어 주세요'} onClick={() => setBul('edit')}>주보 수정</button>
         </div>
       </div>
 
@@ -151,6 +155,13 @@ export default function Home() {
             )}
           </div>
           <StepList steps={steps} onGo={(s) => nav(`/week/${primary.id}/${s.tab}`)} />
+          <div className="hero-bulletin" role="group" aria-label="이번 주 주보">
+            <b>📰 이번 주 주보</b>
+            <button className="primary" onClick={() => setBul('edit')}>주보 편집 (배치·글 고치기)</button>
+            <button onClick={() => setBul('style')}>주보 꾸미기</button>
+            <a className="btn" href={`${base}/weeks/${primary.id}/bulletin`} target="_blank" rel="noopener">인쇄용 주보 열기</a>
+            <a className="btn" href={`${base}/weeks/${primary.id}/bulletin?format=fold4`} target="_blank" rel="noopener">접는 4면 열기</a>
+          </div>
         </div>
       )}
 
@@ -165,6 +176,8 @@ export default function Home() {
       {upcoming.length > 0 && (<div className="card"><h3>미리 준비 중인 예배</h3><WeekList weeks={upcoming} /></div>)}
       {recent.length > 0 && (<div className="card"><h3>지난 예배</h3><WeekList weeks={recent} /></div>)}
 
+      {primary && bul === 'edit' && <BulletinEditor week={primary} onClose={() => setBul(null)} />}
+      {primary && bul === 'style' && <BulletinStyle week={primary} onClose={() => setBul(null)} />}
       {dialog && <CreateWeekDialog from={dialog === 'copy' ? previous : null} defaultDate={sun} onClose={() => setDialog(null)} />}
     </section>
   );

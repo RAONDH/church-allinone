@@ -614,6 +614,96 @@ export async function runUi() {
           noErrors('주보 확정본');
         } finally { await hub.put('/api/ws/sample/bulletin', settings); }
       }],
+      ['이번 주 준비함 주보(예제): 준비함에 이번 주 주보 칸이 바로 보이고, [주보 편집]을 누르면 결과물 탭으로 가지 않고 그 자리에서 주보 편집 창이 열리며, [주보 수정]·[주보 꾸미기]도 열린다', async () => {
+        // 예제에는 이번 주 예배가 없을 수 있어, 이번 주일 예배를 하나 만들었다가 끝나면 지운다
+        const x = new Date(); x.setDate(x.getDate() + ((7 - x.getDay()) % 7));
+        const sun = `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        const had = (await hub.get('/api/ws/sample')).data.weeks.some((w) => w.date === sun);
+        const made = had ? null : (await hub.post('/api/ws/sample/weeks', { date: sun, name: '준비함 시험 예배' })).data.week?.id;
+        try {
+        await go('/?ws=sample');
+        await waitText('📰 이번 주 주보');
+        await clickText('주보 편집 (배치·글 고치기)', '.hero-bulletin button');
+        await waitText('주보 편집 ·');
+        ok(await page.$('.bul-preview iframe'), '주보 편집 미리보기가 열림');
+        eq(new URL(page.url()).pathname, '/', '준비함에 그대로 있음');
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 5000 });
+        await clickText('주보 수정', '.home-head button');
+        await waitText('주보 편집 ·');
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 5000 });
+        await clickText('주보 꾸미기', '.hero-bulletin button');
+        await page.waitForSelector('.dialog .style-dot, .dialog .combo-grid', { timeout: 8000 });
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 5000 });
+        } finally { if (made) await hub.del(`/api/ws/sample/weeks/${made}`); }
+        noErrors('준비함 주보');
+      }],
+      ['주보 끌어 옮기기·바로 고치기(예제): 편집 창 미리보기에서 칸을 끌어 다른 단의 맨 위로 옮기면 배치가 저장되고, 칸을 누르면 그 자리에 글 상자가 떠서 고쳐 저장되며, 칸 글자 크기를 바꾸면 주보에 반영된다', async () => {
+        const wk = await sampleWeek();
+        const S = '/api/ws/sample';
+        const settings = (await hub.get(`${S}/bulletin`)).data;
+        const B = `${S}/weeks/${wk}/bulletin`;
+        const frame = () => page.frames().find((x) => x.url().includes('bulletin?format=print') && x.url().includes('edit=1'));
+        const inFrame = async (fn, arg, timeout = 8000) => {
+          const end = Date.now() + timeout; let v;
+          while (Date.now() < end) { const f = frame(); v = f ? await f.evaluate(fn, arg).catch(() => null) : null; if (v) return v; await sleep(200); }
+          throw new Error('편집 미리보기에서 기대한 것을 찾지 못했습니다');
+        };
+        // 미리보기 안 좌표 → 화면 좌표 (미리보기는 줄여서 보임)
+        const toPage = async (p) => { const el = await page.$('.bul-preview iframe'); const bx = await el.boundingBox(); const k = bx.width / 1120; return { x: bx.x + p.x * k, y: bx.y + p.y * k }; };
+        try {
+          const ann0 = settings.layout.find((x) => x.id === 'ann');
+          await hub.put(`${S}/bulletin`, { ...settings, layout: settings.layout.map((x) => (x.id === 'ann' ? { ...x, on: true } : x)) });
+          await go(`/week/${wk}/outputs?ws=sample`);
+          await clickText('주보 편집 (배치·글 고치기)');
+          await waitText('주보 편집 ·');
+          await waitText('칸을 끌어');
+          // 교회 소식 칸을 다른 단의 첫 칸 위로 끌어 놓기
+          const pos = await inFrame(() => {
+            if (!document.body.classList.contains('bul-editing')) return null;
+            const cols = [...document.querySelectorAll('.sheet>div')];
+            const sec = document.querySelector('section[data-b="ann"]'); if (!sec) return null;
+            const from = cols.findIndex((c) => c.contains(sec)), other = cols[1 - from];
+            const first = other.querySelector('section[data-b]'); if (!first) return null;
+            const a = sec.getBoundingClientRect(), b = first.getBoundingClientRect();
+            return { from: from ? 'R' : 'L', to: from ? 'L' : 'R', before: first.dataset.b, src: { x: a.left + 30, y: a.top + 12 }, dst: { x: b.left + 40, y: b.top + 4 } };
+          });
+          const p1 = await toPage(pos.src), p2 = await toPage(pos.dst);
+          await page.mouse.move(p1.x, p1.y); await page.mouse.down();
+          await page.mouse.move(p1.x + 20, p1.y + 20, { steps: 4 }); await page.mouse.move(p2.x, p2.y, { steps: 12 }); await sleep(100);
+          await page.mouse.up();
+          await waitText('배치를 저장했습니다');
+          const l1 = (await hub.get(`${S}/bulletin`)).data.layout;
+          eq(l1.find((x) => x.id === 'ann').col, pos.to, '끌어 놓은 단');
+          eq(l1.findIndex((x) => x.id === 'ann') + 1, l1.findIndex((x) => x.id === pos.before), '끌어 놓은 칸 바로 뒤가 원래 첫 칸');
+          const html = (await hub.get(`${B}?format=print`)).data;
+          ok(html.indexOf('data-b="ann"') < html.indexOf(`data-b="${pos.before}"`), '주보에서도 교회 소식이 그 칸 앞', pos);
+          // 칸을 누르면 그 자리에서 고치기
+          const c = await inFrame(() => { const r = document.querySelector('section[data-b="ann"]')?.getBoundingClientRect(); return r && r.top > 0 ? { x: r.left + 30, y: r.top + 12 } : null; });
+          const pc = await toPage(c);
+          await page.mouse.click(pc.x, pc.y);
+          const ta = await page.waitForSelector('.bul-inline textarea[aria-label="교회 소식 바로 고치기 글"]', { timeout: 5000 });
+          await ta.click({ clickCount: 3 }); await page.keyboard.press('Backspace'); await ta.type('미리보기에서 바로 고친 광고');
+          await page.evaluate(() => [...document.querySelectorAll('.bul-inline button')].find((b) => b.innerText.trim() === '저장')?.click());
+          await waitText('이 예배 주보에 저장했습니다');
+          await inFrame(() => document.body.innerText.includes('미리보기에서 바로 고친 광고') || null);
+          ok(!(await page.$('.bul-inline')), '저장하면 글 상자가 닫힘');
+          // 칸 글자 크기
+          await page.select('select[aria-label="교회 소식 글자 크기"]', 'xl');
+          await waitText('배치를 저장했습니다');
+          await inFrame(() => document.querySelector('section[data-b="ann"].xl') || null);
+          eq((await hub.get(`${S}/bulletin`)).data.layout.find((x) => x.id === 'ann').size, 'xl', '저장된 교회 소식 글자 크기');
+          ok(ann0, '교회 소식 칸이 있음');
+          await clickText('닫기', '.dialog button');
+        } finally {
+          await hub.put(`${S}/bulletin`, settings);
+          const cur = (await hub.get(`${B}/blocks`)).data.blocks.find((x) => x.id === 'ann');
+          if (cur?.text !== null) await hub.put(`${B}/blocks`, { id: 'ann', text: null });
+        }
+        noErrors('주보 끌어 옮기기');
+      }],
       ['주보 표지 사진(예제): 고정 정보에서 표지 사진을 넣고 저장하면 접는 4면 표지 전체를 사진이 덮고 글자는 흰색으로 얹히며, 2단 맨 위에도 사진 띠가 들어가고 넘치지 않는다', async () => {
         const wk = await sampleWeek();
         const S = '/api/ws/sample';

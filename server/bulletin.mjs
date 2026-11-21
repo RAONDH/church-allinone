@@ -22,13 +22,15 @@ export const BLOCKS = [
 const TITLE = Object.fromEntries(BLOCKS.map(([id, t]) => [id, t]));
 // 기본 배치 = 지금까지의 주보 모양 (2단: 왼쪽 L·오른쪽 R / 접는 4면: 2·3·4면)
 const DEFAULT_PLACE = { order: ['L', 2], sermon: ['L', 2], summary: ['L', 3], ann: ['R', 3], photo: ['R', 3], serve: ['R', 4], events: ['R', 4], births: ['R', 4], info: ['R', 4] };
-/** 칸 배치 정리: 순서대로 { id, on, col: 'L'|'R', face: 2|3|4, size: 'n'|'s' }. 모르는 칸은 빼고 빠진 칸은 기본 자리로 뒤에 붙인다 */
+/** 칸 배치 정리: 순서대로 { id, on, col: 'L'|'R', face: 2|3|4, size: 's'|'n'|'l'|'xl' (작게·보통·크게·아주 크게) }. 모르는 칸은 빼고 빠진 칸은 기본 자리로 뒤에 붙인다 */
+export const SIZES = ['s', 'n', 'l', 'xl'];
+const SIZE_CLASS = { s: 'sm', n: '', l: 'lg', xl: 'xl' };
 export function cleanLayout(raw) {
   const out = [], seen = new Set();
   for (const x of Array.isArray(raw) ? raw : []) {
     if (!x || !TITLE[x.id] || seen.has(x.id)) continue;
     seen.add(x.id);
-    out.push({ id: x.id, on: x.on !== false, col: x.col === 'R' ? 'R' : 'L', face: [2, 3, 4].includes(+x.face) ? +x.face : DEFAULT_PLACE[x.id][1], size: x.size === 's' ? 's' : 'n' });
+    out.push({ id: x.id, on: x.on !== false, col: x.col === 'R' ? 'R' : 'L', face: [2, 3, 4].includes(+x.face) ? +x.face : DEFAULT_PLACE[x.id][1], size: SIZES.includes(x.size) ? x.size : 'n' });
   }
   for (const [id, , flag] of BLOCKS) if (!seen.has(id)) out.push({ id, on: flag ? BULLETIN_DEFAULTS[flag] : true, col: DEFAULT_PLACE[id][0], face: DEFAULT_PLACE[id][1], size: 'n' });
   return out;
@@ -180,7 +182,31 @@ window.__fit=out;try{if(parent!==window)parent.postMessage({type:'bulletin-fit',
 export const PAD = 7, GAP = 18, FONT = 12.5;
 /** 2단 인쇄용 한 단에 들어가는 높이 (194mm - 위아래 여백, 2mm 넉넉히) */
 export const PRINT_ROOM_MM = 194 - PAD * 2 - 2;
-export function bulletinHtml(d, format = 'print') {
+// 주보 편집 창의 미리보기에서만 쓰는 편집 도구 (인쇄·파일·확정본에는 넣지 않음)
+// - 칸을 끌어 다른 단(2단) · 다른 면(4면)이나 다른 칸 앞으로 옮기면 'bulletin-move' { id, place, before }
+// - 칸을 누르면(끌지 않고) 'bulletin-pick' { id, rect } → 편집 창이 그 자리에 글 고치기 칸을 띄운다
+export function editScript(kind) {
+  return `<style>body.bul-editing section[data-b]{cursor:grab;outline:1px dashed transparent;outline-offset:2px;border-radius:4px}body.bul-editing section[data-b]:hover{outline-color:#2f6fd6;background:#2f6fd60d}
+section.bul-dragging{opacity:.35}.bul-drop{height:0;border-top:3px solid #2f6fd6;margin:-2px 0 2px;pointer-events:none}.bul-ghost{position:fixed;z-index:9;pointer-events:none;padding:4px 10px;border-radius:6px;background:#2f6fd6;color:#fff;font:600 13px sans-serif;box-shadow:0 2px 8px #0004}
+.bul-target{background:#2f6fd610;box-shadow:inset 0 0 0 2px #2f6fd655}</style>
+<script>addEventListener('load',()=>{document.body.classList.add('bul-editing');
+const boxes=()=>'${kind}'==='print'?[...document.querySelectorAll('.sheet>div')].map((el,i)=>({el,place:i?'R':'L'})):[...document.querySelectorAll('.face')].map(el=>({el,place:+((el.querySelector('.fno')||{}).textContent||1)})).filter(b=>b.place>1);
+let st=null;const line=document.createElement('div');line.className='bul-drop';const ghost=document.createElement('div');ghost.className='bul-ghost';
+const clear=()=>{line.remove();ghost.remove();document.querySelectorAll('.bul-target').forEach(e=>e.classList.remove('bul-target'));if(st&&st.sec)st.sec.classList.remove('bul-dragging')};
+const where=(x,y)=>{const bs=boxes();let b=bs.find(b=>{const r=b.el.getBoundingClientRect();return x>=r.left&&x<=r.right});if(!b)return null;
+const secs=[...b.el.querySelectorAll('section[data-b]')].filter(s=>s!==st.sec);const nx=secs.find(s=>{const r=s.getBoundingClientRect();return y<r.top+r.height/2});return{b,before:nx||null,last:secs[secs.length-1]}};
+addEventListener('pointerdown',e=>{const sec=e.target.closest&&e.target.closest('section[data-b]');if(!sec||e.button!==0)return;e.preventDefault();st={sec,x:e.clientX,y:e.clientY,drag:false}});
+addEventListener('pointermove',e=>{if(!st)return;if(!st.drag&&Math.hypot(e.clientX-st.x,e.clientY-st.y)<6)return;
+if(!st.drag){st.drag=true;st.sec.classList.add('bul-dragging');ghost.textContent=(st.sec.querySelector('h3')||{}).textContent||st.sec.dataset.t||'칸';document.body.appendChild(ghost)}
+ghost.style.left=(e.clientX+12)+'px';ghost.style.top=(e.clientY+8)+'px';const w=where(e.clientX,e.clientY);document.querySelectorAll('.bul-target').forEach(x=>x.classList.remove('bul-target'));st.to=w;if(!w){line.remove();return}
+w.b.el.classList.add('bul-target');if(w.before)w.before.before(line);else if(w.last)w.last.after(line);else w.b.el.appendChild(line)});
+addEventListener('pointerup',e=>{if(!st)return;const s=st;clear();st=null;
+if(s.drag){if(s.to)parent.postMessage({type:'bulletin-move',id:s.sec.dataset.b,place:s.to.b.place,before:s.to.before?s.to.before.dataset.b:null},location.origin);return}
+const r=s.sec.getBoundingClientRect();parent.postMessage({type:'bulletin-pick',id:s.sec.dataset.b,rect:{x:r.left+scrollX,y:r.top+scrollY,w:r.width,h:r.height}},location.origin)});
+addEventListener('pointercancel',()=>{clear();st=null});});</script>`;
+}
+
+export function bulletinHtml(d, format = 'print', { edit = false } = {}) {
   const { s, church, week: w } = d;
   const songs = d.order.filter((i) => i.type === 'song' || i.type === 'score');
   const on = (id) => s.layout.find((x) => x.id === id)?.on;
@@ -211,15 +237,16 @@ export function bulletinHtml(d, format = 'print') {
   const block = (it) => {
     if (!it.on) return '';
     const o = d.over[it.id] || {};
+    // 글자 크기: 이번 주 '글자 작게'가 먼저, 아니면 배치에 정한 칸 크기
+    const sz = o.size === 's' ? 'sm' : SIZE_CLASS[it.size] || '';
     if (it.id === 'photo') {   // 사진·포스터: 그림 한 장 + 설명 글(있으면)
       const src = d.img(o.img), cap = typeof o.text === 'string' ? o.text.trim() : '';
       if (!src && !cap) return '';
-      return `<section data-b="photo" data-t="사진·포스터" class="photo${it.size === 's' || o.size === 's' ? ' sm' : ''}">${src ? `<img src="${src}" alt="${esc(cap.split('\n')[0] || '사진')}">` : ''}${cap ? `<p class="cap">${lines(cap)}</p>` : ''}</section>`;
+      return `<section data-b="photo" data-t="사진·포스터" class="photo${sz ? ` ${sz}` : ''}">${src ? `<img src="${src}" alt="${esc(cap.split('\n')[0] || '사진')}">` : ''}${cap ? `<p class="cap">${lines(cap)}</p>` : ''}</section>`;
     }
     const inner = typeof o.text === 'string' ? freeHtml(it.id, o.text) : auto[it.id];
     if (!inner) return '';
-    const sm = it.size === 's' || o.size === 's' ? ' sm' : '';
-    return it.id === 'info' ? `<section data-b="info" class="info${sm}">${inner}</section>` : `<section data-b="${it.id}"${sm ? ' class="sm"' : ''}><h3>${esc(TITLE[it.id])}</h3>${inner}</section>`;
+    return it.id === 'info' ? `<section data-b="info" class="info${sz ? ` ${sz}` : ''}">${inner}</section>` : `<section data-b="${it.id}"${sz ? ` class="${sz}"` : ''}><h3>${esc(TITLE[it.id])}</h3>${inner}</section>`;
   };
   const blocksWhere = (f) => s.layout.filter(f).map(block).join('');
   const lockNote = (short) => (d.hidden ? `<p class="small" style="color:#a33">🔒 잠금이 걸려 있어 생일·봉사·일정은 넣지 않았습니다.${short ? '' : ' 잠금을 풀고 다시 열어 주세요.'}</p>` : '');
@@ -237,7 +264,7 @@ section{margin:0 0 12px}h3{font-size:1rem;margin:0 0 6px;color:var(--a);border-l
 blockquote{margin:0 0 6px;padding:6px 10px;background:#eef3f0;border-radius:6px;font-weight:700}.ann{padding-left:1.2em;margin:0}.ann li{margin:2px 0}
 table.serve{width:100%;border-collapse:collapse;font-size:.9em;margin-bottom:6px}.serve th{text-align:left;width:5.5em;color:var(--muted);font-weight:400;padding:2px 4px}.serve td{padding:2px 4px;border-bottom:1px dotted #ddd}
 .ev{list-style:none;padding:0;margin:0}.small{font-size:.85em}.b{font-weight:700;margin:4px 0 2px}.info{border-top:1px solid #ccc;padding-top:8px;font-size:.85em;color:var(--muted);text-align:center}.info p{margin:2px 0}.times{color:var(--ink)}
-.sm{font-size:.86em}section.sm h3{font-size:1rem}.logo{display:block;margin:0 auto 4px;max-height:60px;max-width:180px;object-fit:contain}section.photo img{display:block;margin:0 auto;max-width:100%;max-height:420px;object-fit:contain}section.photo.sm img{max-height:260px}.photo .cap{text-align:center;margin:4px 0 0}.tools{position:fixed;right:12px;top:12px;display:flex;gap:6px}.tools button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer}
+.sm{font-size:.86em}section.sm h3{font-size:1rem}.lg{font-size:1.12em}section.lg h3{font-size:1.08rem}.xl{font-size:1.25em}section.xl h3{font-size:1.18rem}.logo{display:block;margin:0 auto 4px;max-height:60px;max-width:180px;object-fit:contain}section.photo img{display:block;margin:0 auto;max-width:100%;max-height:420px;object-fit:contain}section.photo.sm img{max-height:260px}.photo .cap{text-align:center;margin:4px 0 0}.tools{position:fixed;right:12px;top:12px;display:flex;gap:6px}.tools button{font:inherit;padding:6px 14px;border-radius:8px;border:1px solid #999;background:#fff;cursor:pointer}
 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .cover-bg{position:absolute;left:0;top:0;width:100%;height:100%;object-fit:cover;z-index:0}
 header.pc{position:relative;overflow:hidden;border:none;border-radius:6px;padding:7mm 4mm 5mm;color:#fff;text-shadow:0 1px 3px #0009}
@@ -272,11 +299,11 @@ ${sheetCss}.face{position:relative;overflow:hidden;height:100%}.fno{position:abs
 <body><div class="tools"><button onclick="print()">인쇄</button></div>
 <p class="how">📄 <b>접는 4면 주보</b> — 인쇄 창에서 <b>양면 인쇄</b>를 켜고 <b>짧은 쪽으로 넘기기</b>(Flip on short edge)를 고르세요. A4 한 장 앞뒤로 인쇄한 뒤 가운데를 반으로 접으면 1면(표지) → 2·3면(안쪽) → 4면(뒷면) 순서가 됩니다. 양면 인쇄가 안 되는 프린터는 1쪽을 인쇄한 뒤 종이를 뒤집어 다시 넣고 2쪽을 인쇄하세요.</p>
 <div class="sheet outside"><div>${p4}</div><div>${p1}</div></div><div class="sheet inside"><div>${p2}</div><div>${p3}</div></div>
-${fitScript('fold4', s.autoFill)}</body></html>`;
+${fitScript('fold4', s.autoFill)}${edit ? editScript('fold4') : ''}</body></html>`;
   }
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${css}
 @page{size:A4 landscape;margin:8mm}.sheet{width:281mm;min-height:194mm;margin:12px auto;background:#fff;display:grid;grid-template-columns:1fr 1fr;gap:${GAP}mm;padding:${PAD}mm;box-shadow:0 1px 6px #0002;font-size:${FONT}px;line-height:1.45}.sheet section{margin-bottom:8px}.sheet .order li{padding:0}.sheet header{margin-bottom:6px;padding-bottom:4px}.sheet .church{font-size:1.5rem}.sheet h3{font-size:1.06rem}.sheet .logo{max-height:16mm;max-width:45mm}.sheet section.photo img{max-height:48mm}.sheet section.photo.sm img{max-height:32mm}.sheet>div{line-height:var(--lh,1.45)}.sheet>div section{margin-bottom:var(--gap,8px)}
 .sheet>div{overflow:hidden}.how{max-width:281mm;margin:12px auto 0;padding:8px 12px;background:#fde8e8;border:1px solid #e9a3a3;border-radius:8px;font-size:13px}@media print{body{background:#fff}.sheet{margin:0;box-shadow:none;padding:${PAD}mm;width:auto;min-height:0}.tools,.how{display:none}}${theme}</style></head>
 <body><div class="tools"><button onclick="print()">인쇄</button></div><div class="sheet"><div>${left}</div><div>${right}</div></div>
-${fitScript('print', s.autoFill)}</body></html>`;
+${fitScript('print', s.autoFill)}${edit ? editScript('print') : ''}</body></html>`;
 }

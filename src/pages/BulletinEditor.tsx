@@ -8,7 +8,10 @@ import type { Week } from '../lib/types';
 import { UNSAVED_MSG, useGuardedClose } from '../lib/guard';
 import { shrinkImage } from '../lib/image';
 
-export interface LayoutItem { id: string; on: boolean; col: 'L' | 'R'; face: 2 | 3 | 4; size: 'n' | 's' }
+export type BlockSize = 's' | 'n' | 'l' | 'xl';
+export interface LayoutItem { id: string; on: boolean; col: 'L' | 'R'; face: 2 | 3 | 4; size: BlockSize }
+const SIZE_NAMES: [BlockSize, string][] = [['s', '작게'], ['n', '보통'], ['l', '크게'], ['xl', '아주 크게']];
+interface Rect { x: number; y: number; w: number; h: number }
 interface Block { id: string; title: string; locked: boolean; auto: string; text: string | null; size: 'n' | 's'; img?: string | null }
 interface Settings { layout: LayoutItem[]; [k: string]: any }
 type Fmt = 'print' | 'fold4';
@@ -46,10 +49,17 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
     else dropDraft();
   }, [blocks]); // eslint-disable-line react-hooks/exhaustive-deps
   const g = useGuardedClose(() => { dropDraft(); onClose(); }, dirtyNow);
+  const [inline, setInline] = useState<{ id: string; rect: Rect } | null>(null);   // 미리보기에서 눌러 고치는 칸
   const openEdit = (b: Block) => {
-    if (dirtyNow() && !window.confirm(UNSAVED_MSG)) return;
-    if (editing === b.id) { setEditing(null); dropDraft(); return; }
+    if (dirtyNow() && !window.confirm(UNSAVED_MSG)) return false;
+    setInline(null);
+    if (editing === b.id) { setEditing(null); dropDraft(); return false; }
     setEditing(b.id); setDraft(b.text ?? b.auto); dropDraft();
+    return true;
+  };
+  const closeInline = () => {
+    if (dirtyNow() && !window.confirm(UNSAVED_MSG)) return;
+    setInline(null); setEditing(null); dropDraft();
   };
   const typeDraft = (id: string, text: string) => { setDraft(text); keepDraft(id, text); };
 
@@ -100,6 +110,55 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
   const cutIds = new Set((fit || []).flatMap((p) => p.cut));
   const move = (i: number, d: -1 | 1) => { const j = i + d; if (j < 0 || j >= layout.length) return; const n = [...layout]; [n[i], n[j]] = [n[j], n[i]]; saveLayout(n); };
   const patch = (id: string, p: Partial<LayoutItem>) => saveLayout(layout.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  // 미리보기에서 칸을 끌어 놓음: 그 단(2단)·면(4면)의 before 칸 앞으로, before 가 없으면 그 자리 맨 끝으로
+  const moveTo = (id: string, place: unknown, before: string | null) => {
+    const key = fmt === 'print' ? 'col' : 'face';
+    const ok = fmt === 'print' ? place === 'L' || place === 'R' : [2, 3, 4].includes(place as number);
+    const it = layout.find((x) => x.id === id);
+    if (!it || !ok || before === id) return;
+    const n = layout.filter((x) => x.id !== id);
+    let i = before ? n.findIndex((x) => x.id === before) : -1;
+    if (i < 0) { let last = -1; n.forEach((x, j) => { if (x.on && x[key] === place) last = j; }); i = last < 0 ? n.length : last + 1; }
+    n.splice(i, 0, { ...it, [key]: place });
+    if (n.every((x, j) => x.id === layout[j].id && x[key] === layout[j][key])) return;
+    saveLayout(n);
+  };
+  const onPreviewMsg = (m: any) => {
+    if (m?.type === 'bulletin-move' && typeof m.id === 'string') moveTo(m.id, m.place, typeof m.before === 'string' ? m.before : null);
+    if (m?.type === 'bulletin-pick' && typeof m.id === 'string') {
+      const b = blocks.find((x) => x.id === m.id);
+      if (!b) return;
+      if (b.locked) { setErr(`‘${b.title}’ 칸은 잠금 중이라 고칠 수 없습니다.`); return; }
+      if (editing === b.id && inline?.id === b.id) return;
+      if (editing !== b.id && !openEdit(b)) return;
+      if (b.id === 'photo') { document.querySelector('.bul-blocks .bul-text')?.scrollIntoView({ block: 'nearest' }); return; }   // 사진은 왼쪽에서 파일을 고른다
+      const r = m.rect || {};
+      setInline({ id: b.id, rect: { x: +r.x || 0, y: +r.y || 0, w: +r.w || 300, h: +r.h || 0 } });
+    }
+  };
+  const inlineBlock = inline && editing === inline.id ? blocks.find((x) => x.id === inline.id) : undefined;
+  const inlineItem = inlineBlock && layout.find((x) => x.id === inlineBlock.id);
+  const overlay = inline && inlineBlock && inlineItem ? (k: number, boxW: number, boxH: number) => {
+    const w = Math.min(boxW - 8, Math.max(320, inline.rect.w * k));
+    const left = Math.max(4, Math.min(inline.rect.x * k, boxW - w - 4));
+    const top = Math.max(4, Math.min(inline.rect.y * k, boxH - 290));
+    const b = inlineBlock;
+    return (
+      <div className="bul-inline" style={{ left, top, width: w }} role="group" aria-label={`${b.title} 바로 고치기`}>
+        <div className="row" style={{ alignItems: 'center', gap: 6 }}>
+          <b className="grow">{b.title}</b>
+          <select aria-label={`${b.title} 글자 크기 (미리보기)`} value={inlineItem.size} onChange={(e) => patch(b.id, { size: e.target.value as BlockSize })}>{SIZE_NAMES.map(([v, t]) => <option key={v} value={v}>글자 {t}</option>)}</select>
+        </div>
+        <textarea autoFocus rows={Math.min(10, Math.max(3, (draft.match(/\n/g)?.length || 0) + 2))} value={draft} onChange={(e) => typeDraft(b.id, e.target.value)} aria-label={`${b.title} 바로 고치기 글`} />
+        <div className="row wrap" style={{ gap: 6 }}>
+          <span className="muted small grow">{draft.length > MAX ? '너무 깁니다' : '이 예배 주보에만 저장'}</span>
+          <button className="small" onClick={closeInline}>취소</button>
+          {b.text !== null && <button className="small" onClick={async () => { if (await saveBlock(b.id, { text: null })) { setDraft(b.auto); dropDraft(); } }}>자동 내용으로</button>}
+          <button className="small primary" disabled={draft.length > MAX} onClick={async () => { if (await saveBlock(b.id, { text: draft })) { setEditing(null); setInline(null); dropDraft(); } }}>저장</button>
+        </div>
+      </div>
+    );
+  } : undefined;
 
   return (
     <Dialog onClose={g.close}>
@@ -130,9 +189,11 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
                   {fmt === 'print'
                     ? <select aria-label={`${b.title} 자리`} value={it.col} onChange={(e) => patch(it.id, { col: e.target.value as 'L' | 'R' })}><option value="L">왼쪽</option><option value="R">오른쪽</option></select>
                     : <select aria-label={`${b.title} 면`} value={it.face} onChange={(e) => patch(it.id, { face: +e.target.value as 2 | 3 | 4 })}><option value={2}>2면</option><option value={3}>3면</option><option value={4}>4면(뒷면)</option></select>}
+                  <select aria-label={`${b.title} 글자 크기`} title="이 칸의 글자 크기 (매주 그대로)" value={it.size} onChange={(e) => patch(it.id, { size: e.target.value as BlockSize })}>{SIZE_NAMES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>
                   <button className="small" disabled={b.locked} onClick={() => openEdit(b)}>{it.id === 'photo' ? '사진 넣기' : '글 고치기'}</button>
                 </div>
-                {editing === it.id && (
+                {editing === it.id && inline?.id === it.id && <p className="muted small" style={{ margin: '4px 0 0' }}>미리보기에서 고치는 중입니다.</p>}
+                {editing === it.id && inline?.id !== it.id && (
                   <div className="bul-text">
                     {it.id === 'photo' && (
                       <div className="bul-photo">
@@ -161,7 +222,8 @@ export default function BulletinEditor({ week, onClose }: { week: Week; onClose:
         </ol>
         <div className="bul-right">
           <FitBar fit={fit} fmt={fmt} draft={!!tok} />
-          <Preview src={`${base}/weeks/${week.id}/bulletin?format=${fmt}&v=${tick}${tok ? `&preview=${tok}` : ''}`} onFit={setFit} />
+          <p className="muted small bul-hint">미리보기에서 칸을 <b>끌어</b> 다른 {fmt === 'print' ? '단' : '면'}이나 다른 칸 앞으로 옮기고, 칸을 <b>누르면</b> 그 자리에서 글을 고칩니다.</p>
+          <Preview src={`${base}/weeks/${week.id}/bulletin?format=${fmt}&v=${tick}${tok ? `&preview=${tok}` : ''}&edit=1`} onFit={setFit} onMessage={onPreviewMsg} overlay={overlay} />
         </div>
       </div>
     </Dialog>
@@ -202,12 +264,16 @@ function FitBar({ fit, fmt, draft }: { fit: FitPart[] | null; fmt: Fmt; draft: b
 const TITLES: Record<string, string> = { order: '예배 순서', sermon: '오늘의 말씀', summary: '설교 요약', ann: '교회 소식', photo: '사진·포스터', serve: '섬기는 분들', events: '다음 주 일정', births: '생일을 축하합니다', info: '교회 안내' };
 
 // A4 가로 주보(약 1100px 폭)를 칸 폭에 맞게 줄여 보여 준다. 주보가 잰 분량은 onFit 으로 받는다
-export function Preview({ src, onFit }: { src: string; onFit: (f: FitPart[]) => void }) {
+// onMessage: 편집용 미리보기(edit=1)가 보내는 끌어 옮기기·눌러 고치기 알림. overlay: 미리보기 위에 띄울 것 (배율 k, 상자 폭·높이)
+export function Preview({ src, onFit, onMessage, overlay }: { src: string; onFit: (f: FitPart[]) => void; onMessage?: (m: any) => void; overlay?: (k: number, w: number, h: number) => React.ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
+  const msgRef = useRef(onMessage);
+  msgRef.current = onMessage;
   useEffect(() => {
     const on = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin || e.source !== frame.current?.contentWindow || e.data?.type !== 'bulletin-fit') return;
+      if (e.origin !== window.location.origin || e.source !== frame.current?.contentWindow) return;
+      if (e.data?.type !== 'bulletin-fit') { msgRef.current?.(e.data); return; }
       onFit(e.data.parts);
     };
     window.addEventListener('message', on);
@@ -224,6 +290,7 @@ export function Preview({ src, onFit }: { src: string; onFit: (f: FitPart[]) => 
   return (
     <div className="bul-preview" ref={box} style={{ height: 1700 * k }}>
       <iframe ref={frame} title="주보 미리보기" src={src} style={{ width: 1120, height: 1700, transform: `scale(${k})` }} />
+      {overlay?.(k, 1120 * k, 1700 * k)}
     </div>
   );
 }

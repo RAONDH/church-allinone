@@ -592,6 +592,28 @@ export async function runApi() {
           has((await get(`${B}?final=${fv}&format=fold4`)).data, `class="cover-bg" src="${PNG}"`, '사진을 빼도 확정본 표지는 그대로');
         } finally { await put(`${S}/bulletin`, settings); }
       }],
+      ['주보 칸 크기·편집용 미리보기(예제): 칸마다 글자 크기(작게·보통·크게·아주 크게)를 저장해 매주 쓰고, 이번 주 글자 작게가 먼저이며, 끌어 옮기기 도구는 편집 미리보기에만 들어간다', async () => {
+        const wk = (await get(S)).data.weeks.find((w) => w.wc?.serviceId);
+        const B = `${S}/weeks/${wk.id}/bulletin`;
+        const settings = (await get(`${S}/bulletin`)).data;
+        try {
+          const layout = settings.layout.map((x) => (x.id === 'ann' ? { ...x, on: true, size: 'xl' } : x.id === 'info' ? { ...x, on: true, size: 'l' } : x.id === 'order' ? { ...x, size: 'huge' } : x));
+          const saved = expectStatus(await put(`${S}/bulletin`, { ...settings, layout }), 200, '칸 크기 저장').layout;
+          eq(['ann', 'info', 'order'].map((id) => saved.find((x) => x.id === id).size), ['xl', 'l', 'n'], '저장된 칸 크기 (모르는 값은 보통)');
+          const html = (await get(`${B}?format=print`)).data;
+          has(html, '<section data-b="ann" class="xl">', '교회 소식 아주 크게');
+          has(html, '<section data-b="info" class="info lg">', '교회 안내 크게');
+          expectStatus(await put(`${B}/blocks`, { id: 'ann', size: 's', _base: { text: null, size: 'n', img: null } }), 200, '이번 주 글자 작게');
+          has((await get(`${B}?format=print`)).data, '<section data-b="ann" class="sm">', '이번 주 글자 작게가 칸 크기보다 먼저');
+          await put(`${B}/blocks`, { id: 'ann', size: 'n', _base: { text: null, size: 's', img: null } });
+          ok(!html.includes('bulletin-move'), '보통 주보에는 편집 도구가 없음');
+          for (const f of ['print', 'fold4']) has((await get(`${B}?format=${f}&edit=1`)).data, "type:'bulletin-move'", `${f} 편집 미리보기에는 끌어 옮기기 도구`);
+          ok(!(await get(`${B}?format=print&edit=1&download=1`)).data.includes('bulletin-move'), '파일로 받을 때는 편집 도구를 넣지 않음');
+          ok(!(await get(`${B}?format=mobile&edit=1`)).data.includes('bulletin-move'), '휴대폰 주보에는 편집 도구를 넣지 않음');
+          const fv = expectStatus(await post(`${B}/finals`, {}), 200, '확정').finals[0].v;
+          ok(!(await get(`${B}?final=${fv}&format=print&edit=1`)).data.includes('bulletin-move'), '확정본에는 편집 도구가 없음');
+        } finally { await put(`${S}/bulletin`, settings); }
+      }],
       ['잠금 중 주보 편집: 봉사·일정·생일 칸은 자동 내용도 고친 글도 보이지 않고 고칠 수 없다 (광고는 고칠 수 있음)', async () => {
         const { fx } = ctx;
         const B = `${R}/weeks/${ctx.week}/bulletin`;

@@ -696,7 +696,8 @@ async function api(req, res, url) {
     const d = bulletinData({ db, week: w, order, hide });
     const lk = bulletinDrafts.get(url.searchParams.get('look') || '');
     if (lk?.look && lk.ws === r[1]) d.s = { ...d.s, ...lk.look };
-    res.end(bulletinHtml(d, format)); return;
+    // edit=1: 주보 편집 창의 미리보기 (끌어 옮기기·눌러 고치기). 파일로 받을 때는 넣지 않는다
+    res.end(bulletinHtml(d, format, { edit: url.searchParams.get('edit') === '1' && !url.searchParams.has('download') && format !== 'mobile' })); return;
   }
 
   // 찬양 자료 (가사·곡 구성은 예배송출, 작사·작곡·출처·구분 메모는 라온 교회 올인원)
