@@ -6,7 +6,7 @@
 
 맥과 윈도우에서 쓰고, **무료로 나눕니다.** 회원 가입이나 우리 쪽 서버가 없고, 자료는 설치한 그 컴퓨터에만 저장됩니다.
 
-**[소개 페이지 · 받는 곳](https://raon-easypaster.github.io/church-allinone/)** · [최신 릴리스](https://github.com/raon-easypaster/church-allinone/releases/latest) · [카카오 오픈채팅 문의](https://open.kakao.com/o/gSkET2Wi)
+**[소개 페이지 · 받는 곳](https://raondh.github.io/church-allinone/)** · [최신 릴리스](https://github.com/RAONDH/church-allinone/releases/latest) · [카카오 오픈채팅 문의](https://open.kakao.com/o/gSkET2Wi)
 
 ![이번 주 준비함 화면 (예제 자료)](docs/img/01-home.jpg)
 
@@ -14,7 +14,7 @@
 
 ## 받기
 
-[최신 릴리스](https://github.com/raon-easypaster/church-allinone/releases/latest)에서 받습니다.
+[최신 릴리스](https://github.com/RAONDH/church-allinone/releases/latest)에서 받습니다.
 
 | 파일 | 대상 |
 |---|---|
@@ -124,7 +124,7 @@ AI가 만든 웹페이지는 따로 떨어진 상자(sandbox)에서만 열어, �
 
 ## 문의와 후원
 
-- 문의: [카카오 오픈채팅](https://open.kakao.com/o/gSkET2Wi) · [GitHub 의견 게시판](https://github.com/raon-easypaster/church-allinone/issues)
+- 문의: [카카오 오픈채팅](https://open.kakao.com/o/gSkET2Wi) · [GitHub 의견 게시판](https://github.com/RAONDH/church-allinone/issues)
 - 라온 교회 올인원은 자율 후원으로 운영됩니다. 후원은 부담을 갖지 않으셔도 됩니다. 무료로 사용하셔도 괜찮습니다.
   - 카카오뱅크 3333-01-9034483 (이광복)
   - 프로그램 안에서는 '설정' 화면 아래와 모든 화면 맨 아래 '후원 안내'에서 볼 수 있습니다.
@@ -173,7 +173,7 @@ npm install && npm run build && npm start   # http://localhost:5191
   - 자료는 `%APPDATA%\ChurchAllInOne`(예배송출은 `%APPDATA%\WorshipCaster`)에 저장되어 폴더를 바꿔도 남습니다.
   - 윈도우에서는 `apps.json`의 `win` 설정으로 켭니다. 설교 쇼츠 메이커는 설치 파일로 설치한 뒤 자기 창으로 열리고(`exe`·`installer`), HWP 변환기는 `start-hub.cmd`로 켭니다.
 - **자동 업데이트 묶음** `installer/make-update.sh [만들 위치]` → `ChurchAllInOne-update.zip` (맥·윈도우 공통: `server`·빌드된 `dist`·`apps.json`·`package.json`).
-  - 프로그램은 6시간마다 [Releases latest](https://github.com/raon-easypaster/church-allinone/releases/latest)를 확인합니다. 이 파일과 `SHA256SUMS.txt`, 그 서명 `SHA256SUMS.txt.sig`가 릴리스에 있어야 자동 설치합니다.
+  - 프로그램은 6시간마다 [Releases latest](https://github.com/RAONDH/church-allinone/releases/latest)를 확인합니다. 이 파일과 `SHA256SUMS.txt`, 그 서명 `SHA256SUMS.txt.sig`가 릴리스에 있어야 자동 설치합니다.
   - **서명 확인**: 확인값 목록(`SHA256SUMS.txt`)에 Ed25519로 서명합니다. 프로그램은 `server/update-keys.mjs`에 든 공개 열쇠로 서명을 먼저 확인하고, 맞지 않으면 설치하지 않습니다. 릴리스 파일과 확인값 목록을 함께 바꿔치기해도, 비밀 열쇠가 없으면 서명을 만들 수 없습니다.
     - 비밀 열쇠는 저장소에 넣지 않고 배포하는 맥의 `~/.raon-workspace/signing/church-allinone-update.key`에만 둡니다. 처음 한 번 `node installer/signing.mjs keygen`으로 만듭니다.
     - **비밀 열쇠를 잃어버리면** 이미 설치된 프로그램이 새 릴리스를 자동 설치하지 못합니다. 그때는 새 열쇠를 만들어 새 버전을 사용자가 직접 한 번 설치해야 합니다. 그러니 USB나 암호 관리 프로그램 등에 따로 보관하세요.

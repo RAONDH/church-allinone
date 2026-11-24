@@ -238,7 +238,7 @@ export default function Guide() {
 
       <div className="card" id="install">
         <h2>13. 설치와 업데이트 (맥·윈도우)</h2>
-        <p>받는 곳: <a href="https://raon-easypaster.github.io/church-allinone/" target="_blank" rel="noopener">raon-easypaster.github.io/church-allinone</a></p>
+        <p>받는 곳: <a href="https://raondh.github.io/church-allinone/" target="_blank" rel="noopener">raondh.github.io/church-allinone</a></p>
         <h3>새 버전 자동 업데이트 (v0.2.5부터)</h3>
         <p>프로그램이 6시간에 한 번 새 버전을 확인합니다. 새 버전이 있으면 화면 가운데에 <b>새 버전이 있습니다</b> 창이 뜹니다. <b>지금 업데이트</b>를 누르면 받아서 설치하고 저절로 다시 켜집니다(1분 안팎). 열려 있던 화면도 저절로 새로 고침됩니다.</p>
         <ul>
