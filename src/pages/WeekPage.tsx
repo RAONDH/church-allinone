@@ -462,9 +462,19 @@ function SubsTab({ week, status, setStatus, replaceWeek }: { week: Week; status:
   const { base, ov } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // 예배 정보에서 채우는 자막(본문·설교 제목·대표 기도·광고)은 처음부터 펼쳐 두어, 바꾼 내용을 바로 확인하게
+  const linked = useMemo(() => {
+    const L = week.wc?.links || {};
+    const m = new Map<string, string>();
+    for (const [k, label] of [['passage', '본문'], ['title', '설교 제목'], ['prayer', '대표 기도자'], ['notice', '광고']] as const) { const id = (L as any)[k]; if (id) m.set(id, label); }
+    return m;
+  }, [week.wc]);
+  const [open, setOpen] = useState<Set<string>>(() => new Set(linked.keys()));
   const block = <NeedLink status={status} />;
   if (!status?.summary) return block;
   const s = status.summary;
+  const allOpen = s.items.every((it) => open.has(it.id));
+  const toggle = (id: string) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const f = status.final!;
   const ph = new Map<string, string[]>();
   for (const p of s.placeholders) ph.set(p.itemId, [...(ph.get(p.itemId) || []), p.text]);
@@ -492,16 +502,39 @@ function SubsTab({ week, status, setStatus, replaceWeek }: { week: Week; status:
           <button onClick={() => openCaster(base, week.id, setErr)}>예배송출에서 편집 ↗</button>
         </div>
         {err && <p className="alert warn">{err}</p>}
+        <div className="row between small subs-tools">
+          <span className="muted">순서를 누르면 화면마다 나가는 자막 글이 보입니다.{linked.size ? ' 예배 정보에서 채우는 자막은 펼쳐 두었습니다.' : ''}</span>
+          <button className="link" onClick={() => setOpen(allOpen ? new Set() : new Set(s.items.map((it) => it.id)))}>{allOpen ? '모두 접기' : '모두 펼치기'}</button>
+        </div>
         <ol className="order">
-          {s.items.map((it) => (
-            <li key={it.id} className={ph.has(it.id) || it.empty ? 'warn' : ''}>
-              <span className={`type t-${it.type}`}>{({ song: '찬양', score: '악보', text: '순서', notice: '광고', bible: '말씀', ppt: 'PPT', html: 'HTML' } as any)[it.type] || it.type}</span>
-              <span className="grow">{it.title}{it.type === 'song' && it.arr.length ? <span className="muted small"> · {it.arr.join(' → ')}</span> : null}</span>
-              <span className="muted small">{it.slideCount}장</span>
-              {ph.has(it.id) && <span className="pill warn">채울 칸 {ph.get(it.id)!.join(' ')}</span>}
-              {it.empty && <span className="pill warn">내용 없음</span>}
-            </li>
-          ))}
+          {s.items.map((it) => {
+            const isOpen = open.has(it.id);
+            return (
+              <li key={it.id} className={`${ph.has(it.id) || it.empty ? 'warn' : ''} ${isOpen ? 'open' : ''}`}>
+                <button className="order-head" onClick={() => toggle(it.id)} aria-expanded={isOpen}>
+                  <span className={`type t-${it.type}`}>{({ song: '찬양', score: '악보', text: '순서', notice: '광고', bible: '말씀', ppt: 'PPT', html: 'HTML' } as any)[it.type] || it.type}</span>
+                  <span className="grow">{it.title}{it.type === 'song' && it.arr.length ? <span className="muted small"> · {it.arr.join(' → ')}</span> : null}</span>
+                  {linked.has(it.id) && <span className="pill info">예배 정보: {linked.get(it.id)}</span>}
+                  {ph.has(it.id) && <span className="pill warn">채울 칸 {ph.get(it.id)!.join(' ')}</span>}
+                  {it.empty && <span className="pill warn">내용 없음</span>}
+                  <span className="muted small">{it.slideCount}장 {isOpen ? '▴' : '▾'}</span>
+                </button>
+                {isOpen && (
+                  <ol className="slide-peek">
+                    {(it.slides || []).map((sl, i) => (
+                      <li key={i}>
+                        <span className="muted small">{i + 1}{sl.label ? ` · ${sl.label}` : ''}</span>
+                        {sl.text.trim()
+                          ? <div className="slide-text">{sl.text.split(/(\((?:기도하실 분|본문|설교 제목|광고|날짜·시간|＋[^)]*)\))/).map((part, k) => (k % 2 ? <mark key={k}>{part}</mark> : part))}</div>
+                          : <div className="muted small">{sl.media ? `(${sl.media} 화면)` : '(빈 화면)'}</div>}
+                      </li>
+                    ))}
+                    {!it.slides?.length && <li className="muted small">자막이 없습니다.</li>}
+                  </ol>
+                )}
+              </li>
+            );
+          })}
         </ol>
         <p className="muted small">글자 크기·배경·줄 나누기 같은 자막 편집, 미리보기, 송출은 예배송출에서 합니다. 성경 본문 자막은 예배송출의 성경 기능으로 넣으세요.</p>
       </div>

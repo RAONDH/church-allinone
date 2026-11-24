@@ -20,7 +20,7 @@ export interface Rec { title: string; artist: string; type: string; reason: stri
 export interface Recs { at: number; sample: boolean; basis: string; theme: string; keyMessage: string; items: Rec[]; sources: { uri: string; title: string }[] }
 export interface PraiseFlowStatus { sample?: boolean; running: boolean; ready: boolean | null; providerLabel?: string; installed?: boolean }
 
-export interface SummaryItem { id: string; type: string; title: string; key: string; bpm: number; memo: string; arr: string[]; slideCount: number; labels: string[]; empty: boolean }
+export interface SummaryItem { id: string; type: string; title: string; key: string; bpm: number; memo: string; arr: string[]; slideCount: number; labels: string[]; empty: boolean; slides?: { text: string; label: string; media: string }[] }
 
 export interface WeekStatus {
   linked: boolean; connected: boolean | null; missing?: boolean; error?: string;

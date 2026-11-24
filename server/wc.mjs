@@ -193,6 +193,8 @@ export function summarize(state, serviceId) {
     items: items.map((i) => ({
       id: i.id, type: i.type, title: i.title, key: i.key || '', bpm: i.bpm || 0, memo: i.memo || '', arr: i.arr || [],
       slideCount: (i.slides || []).length, labels: [...new Set((i.slides || []).map((s) => s.label).filter(Boolean))],
+      // 자막 탭에서 장마다 무슨 글이 나가는지 보이게 (글은 앞부분만, 그림·HTML 장은 표시만)
+      slides: (i.slides || []).map((s) => ({ text: String(s.text || '').slice(0, 400), label: s.label || '', media: (s.text || '').trim() ? '' : s.html || s.htmlFile ? 'HTML' : s.bg ? '그림' : '' })),
       empty: !(i.slides || []).some((s) => (s.text || '').trim() || s.bg || s.html || s.htmlFile),
     })),
     songCount: songs.length,

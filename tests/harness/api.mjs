@@ -133,6 +133,24 @@ export async function runApi() {
         st = (await post(`${S}/weeks/${ctx.sw}/setlist`, { op: 'remove', itemId: candidate.id })).data;
         ok(!songsOf(st).some((s) => s.id === candidate.id), '뺀 곡은 없어야 함');
       }],
+      ['자막 탭(예제): 예배 정보를 바꾸면 자막 자료에 장마다 글이 나오고, 바꾼 본문·설교 제목·대표 기도자·광고가 들어 있다', async () => {
+        const W = `${S}/weeks/${ctx.sw}`;
+        const w0 = (await get(W)).data.week;
+        const L = w0.wc?.links || {};
+        ok(L.passage && L.title && L.notice, '예배 정보와 이어진 자막(본문·설교 제목·광고)', L);
+        try {
+          expectStatus(await put(W, { passage: '요한복음 15:1-8', sermonTitle: '자막 점검 설교', prayerLeader: '자막점검 집사', announcements: ['자막 점검 광고 하나', '자막 점검 광고 둘'] }), 200, '예배 정보 저장');
+          const st = (await get(W)).data.status.summary;
+          const text = (id) => (st.items.find((i) => i.id === id)?.slides || []).map((x) => x.text).join('\n');
+          ok(st.items.every((i) => Array.isArray(i.slides) && i.slides.length === i.slideCount), '모든 순서에 장 수만큼 자막 글', st.items.map((i) => [i.title, i.slideCount, i.slides?.length]));
+          has(text(L.passage), '요한복음 15:1-8', '성경 봉독 자막');
+          has(text(L.title), '자막 점검 설교', '말씀 선포 자막');
+          if (L.prayer) has(text(L.prayer), '자막점검 집사', '대표 기도 자막');
+          eq(st.items.find((i) => i.id === L.notice).slides.map((x) => x.text).slice(1), ['자막 점검 광고 하나', '자막 점검 광고 둘'], '광고 자막(한 줄이 한 장)');
+        } finally {
+          await put(W, { passage: w0.passage, sermonTitle: w0.sermonTitle, prayerLeader: w0.prayerLeader || '', announcements: w0.announcements });
+        }
+      }],
       ['자막 확정(예제): 확정본을 떠 두고, 바뀐 뒤 확정본으로 되돌린다', async () => {
         const f = expectStatus(await post(`${S}/weeks/${ctx.sw}/finalize`, {}), 200, '확정');
         ok(f.week.final?.snap?.items?.length > 0, '확정본 자료');

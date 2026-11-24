@@ -823,6 +823,31 @@ export async function runUi() {
         errors = errors.filter((e) => !/status of 4(23|03)/.test(e));   // 잠긴 자료를 부를 때 나오는 423·403 은 정상
         noErrors('잠금');
       }],
+      ['자막 탭(예제): 예배 정보를 바꾸면 자막 탭에서 장마다 글이 펼쳐져 보이고, 접었다 펼 수 있다', async () => {
+        const wk = await sampleWeek();
+        const W = `/api/ws/sample/weeks/${wk}`;
+        const w0 = (await hub.get(W)).data.week;
+        try {
+          await hub.put(W, { sermonTitle: '화면 자막 점검 설교', announcements: ['화면 자막 점검 광고'] });
+          await go(`/week/${wk}/subs?ws=sample`);
+          await waitText('예배 순서와 자막');
+          await waitText('화면 자막 점검 설교');   // 말씀 선포 자막이 처음부터 펼쳐져 있다
+          await waitText('화면 자막 점검 광고');
+          await waitText('예배 정보: 설교 제목');
+          const opened = () => page.evaluate(() => document.querySelectorAll('ol.slide-peek').length);
+          const n0 = await opened();
+          ok(n0 >= 3, '예배 정보에서 채우는 자막은 펼쳐져 있음', n0);
+          await clickText('모두 펼치기');
+          const total = await page.evaluate(() => document.querySelectorAll('ol.order > li').length);
+          await page.waitForFunction((t) => document.querySelectorAll('ol.slide-peek').length === t, { timeout: 5000 }, total);
+          await clickText('모두 접기');
+          await page.waitForFunction(() => document.querySelectorAll('ol.slide-peek').length === 0, { timeout: 5000 });
+          ok(!(await page.evaluate(() => document.body.innerText.includes('화면 자막 점검 설교'))), '접으면 자막 글이 숨음');
+          noErrors('자막 탭');
+        } finally {
+          await hub.put(W, { sermonTitle: w0.sermonTitle, announcements: w0.announcements });
+        }
+      }],
       ['찬양 콘티(예제): music sheet 공유 링크를 넣고 가져오기 → 곡 목록이 보이고, 예배송출 자막에 넣기 → 이번 주 찬양에 들어간다', async () => {
         await go(`/week/${await sampleWeek()}/setlist?ws=sample`);
         await waitText('라온 music sheet에서 가져오기');
