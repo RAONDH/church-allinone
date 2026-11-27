@@ -565,3 +565,10 @@ a.btn.primary-link { background: var(--accent); color: #fff; border-color: var(-
 .slide-peek li { display: grid; grid-template-columns: 4.5em 1fr; gap: 8px; align-items: start; }
 .slide-text { white-space: pre-wrap; background: #1f2937; color: #f9fafb; border-radius: 6px; padding: 6px 10px; font-size: .92rem; line-height: 1.45; }
 .slide-text mark { background: #fde68a; color: #7c2d12; border-radius: 3px; padding: 0 2px; }
+
+/* 재정 입력: 금액을 읽지 못한 칸 */
+.entry-table input.bad-input { border-color: var(--warn, #c0392b); background: color-mix(in srgb, var(--warn, #c0392b) 8%, transparent); }
+.entry-bad { display: block; font-size: 11px; }
+
+/* 키보드로 고를 수 있는 줄·칸 (Tab 으로 갔을 때 보이게) */
+[role="button"][tabindex="0"]:focus-visible { outline: 2px solid var(--accent, #2f6fde); outline-offset: -2px; }

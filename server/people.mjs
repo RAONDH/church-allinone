@@ -49,8 +49,11 @@ export function cleanMember(b, { partial = false } = {}) {
 }
 export const emptyMember = () => ({ ...cleanMember({}), familyId: '' });
 
+/** 그 번호의 성도가 있는지 ('__proto__'·'constructor' 같은 이름이 성도로 통과하지 않게 자기 칸만 본다) */
+export const hasMember = (db, id) => typeof id === 'string' && !!db.members && Object.prototype.hasOwnProperty.call(db.members, id);
+
 function cleanVisit(b, db) {
-  const ids = (Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => db.members[id]);
+  const ids = (Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => hasMember(db, id));
   if (!ids.length) throw Object.assign(new Error('심방 대상 성도를 한 분 이상 골라 주세요.'), { code: 400 });
   const date = normDate(b.date);
   if (!date) throw Object.assign(new Error('날짜를 입력해 주세요.'), { code: 400 });
@@ -61,7 +64,7 @@ function cleanVisit(b, db) {
 function joinFamily(db, m, withId) {
   if (withId === undefined) return;
   if (!withId) { m.familyId = ''; return; }
-  const other = db.members[withId];
+  const other = hasMember(db, withId) ? db.members[withId] : null;
   if (!other || other.id === m.id) return;
   if (!other.familyId) other.familyId = uid();
   m.familyId = other.familyId;
@@ -88,7 +91,7 @@ export async function peopleApi({ sub, req, res, db, save, body, send, HttpError
   let q;
   const s = (re) => sub.match(re);
   db.members ??= {}; db.visits ??= {}; db.attendance ??= {};
-  const getMember = (id) => { const m = db.members[id]; if (!m) throw new HttpError(404, '성도를 찾을 수 없습니다.'); return m; };
+  const getMember = (id) => { const m = hasMember(db, id) ? db.members[id] : null; if (!m) throw new HttpError(404, '성도를 찾을 수 없습니다.'); return m; };
   const wrap = (fn) => { try { return fn(); } catch (e) { throw e.code === 400 ? new HttpError(400, e.message) : e; } };
 
   if (sub === '/people' && req.method === 'GET') {
@@ -190,7 +193,7 @@ export async function peopleApi({ sub, req, res, db, save, body, send, HttpError
   if ((q = s(/^\/attendance\/(\d{4}-\d{2}-\d{2})$/)) && req.method === 'PUT') {
     if (!normDate(q[1])) throw new HttpError(400, '날짜가 올바르지 않습니다.');
     const b = await body(req);
-    const ids = [...new Set((Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => db.members[id]))];
+    const ids = [...new Set((Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => hasMember(db, id)))];
     if (ids.length) db.attendance[q[1]] = ids; else delete db.attendance[q[1]];
     await save();
     send(res, 200, { date: q[1], memberIds: ids });

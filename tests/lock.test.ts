@@ -1,10 +1,15 @@
 // 잠금 점검: 구역 나누기, 암호 저장 방식, 자리 비우면 다시 잠김, 잊었을 때 풀기 파일
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 // @ts-ignore 서버 모듈은 JS
 import { makeLock, areaOf, RESET_FILE } from '../server/lock.mjs';
+
+// 시험마다 새 임시 폴더 (컴퓨터의 임시 폴더 자체에 잠금 기록을 남기지 않게), 끝나면 지운다
+const lockDirs: string[] = [];
+const T = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-lock-')); lockDirs.push(d); return d; };
+afterAll(() => { for (const d of lockDirs) fs.rmSync(d, { recursive: true, force: true }); });
 
 const fakeRes = () => { const h: Record<string, string> = {}; return { setHeader: (k: string, v: string) => { h[k] = v; }, h }; };
 const reqWith = (res: { h: Record<string, string> }) => ({ headers: { cookie: (res.h['Set-Cookie'] || '').split(';')[0] } });
@@ -16,9 +21,10 @@ describe('잠금', () => {
     expect(['/finance', '/finance/tx/abc', '/finance/export.csv'].map(areaOf)).toEqual(Array(3).fill('finance'));
     expect(['/admin', '/events.ics', '/minutes/abc/audio', '/certs', '/serve/plan', '/meeting-types', '/gcals'].map(areaOf)).toEqual(Array(7).fill('admin'));
     expect(['/', '/weeks', '/weeks/abc/after', '/songs', '/church', '/bulletin', '/stt'].map(areaOf)).toEqual(Array(7).fill(''));
+    expect(['/stt/model/small', '/stt/engine'].map(areaOf)).toEqual(['admin', 'admin']);   // 녹취 엔진·모델 받기는 잠금
   });
   it('암호는 원문이 아니라 섞은 값으로만 저장한다', () => {
-    const l = makeLock({ dataDir: os.tmpdir() }), db: any = {};
+    const l = makeLock({ dataDir: T() }), db: any = {};
     l.configure(db, { pin: '482915', areas: ['people'] }, fakeRes());
     expect(JSON.stringify(db.lock)).not.toContain('482915');
     expect(db.lock.hash).toMatch(/^[a-f0-9]{64}$/);
@@ -28,7 +34,7 @@ describe('잠금', () => {
   it('정한 시간 동안 손대지 않으면 다시 잠긴다', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-11-19T10:00:00Z'));
-    const l = makeLock({ dataDir: os.tmpdir() }), db: any = {};
+    const l = makeLock({ dataDir: T() }), db: any = {};
     const res = fakeRes();
     l.configure(db, { pin: '1234', areas: ['finance'], idleMin: 5 }, res);
     const req = reqWith(res);

@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { unzip } from './update.mjs';
+import { renameRetrySync } from './fsx.mjs';
 
 export const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const FOLDER = '라온교회올인원-백업';
 const KEEP_DAYS = 60;
 const AUDIO = /\.(wav|mp3|ogg|flac)$/i;
+// 받는 백업 파일 하나의 최대 크기 (되살리기는 2GB까지 받는다). 시험에서는 작게 바꿀 수 있다
+export const PART_BYTES = Number(process.env.BACKUP_PART_BYTES) || 1.8e9;
 const bad = (msg, code = 400) => Object.assign(new Error(msg), { code });
 
 // ── zip 쓰기 (부품 없이 · 압축 없이 저장, 큰 녹음 파일도 메모리에 다 올리지 않고 흘려 보냄) ──
@@ -17,11 +20,12 @@ function crcUpdate(crc, buf) { let c = crc ^ 0xffffffff; for (let i = 0; i < buf
 async function fileCrc(f) { let crc = 0; for await (const c of fs.createReadStream(f)) crc = crcUpdate(crc, c); return crc; }
 /** entries: [{ name, file }] → res 로 zip 을 흘려 보낸다 (파일마다 두 번 읽음: 확인값 → 내용) */
 export async function streamZip(res, entries) {
-  const central = []; let off = 0;
+  const central = [], skipped = []; let off = 0;
   const write = (b) => new Promise((ok) => (res.write(b) ? ok() : res.once('drain', ok)));
   for (const e of entries) {
-    const size = fs.statSync(e.file).size;
-    if (size >= 0xffffffff) continue;   // 4GB 넘는 파일은 zip(옛 형식)에 못 넣음
+    let size; try { size = fs.statSync(e.file).size; } catch { continue; }   // 받는 사이에 지워진 녹음은 건너뜀
+    // zip(옛 형식)은 4GB 안쪽만 담을 수 있다. 넘치면 그 파일부터는 넣지 않는다 (서버가 꺼지지 않게)
+    if (size >= 0xffffffff || off + 30 + Buffer.byteLength(e.name) + size >= 0xffffffff) { skipped.push(e.name); continue; }
     const crc = await fileCrc(e.file), nm = Buffer.from(e.name);
     const h = Buffer.alloc(30); h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x800, 6); h.writeUInt32LE(crc, 14); h.writeUInt32LE(size, 18); h.writeUInt32LE(size, 22); h.writeUInt16LE(nm.length, 26);
     await write(h); await write(nm);
@@ -32,6 +36,7 @@ export async function streamZip(res, entries) {
   const cd = Buffer.concat(central), n = central.length / 2, eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(n, 8); eocd.writeUInt16LE(n, 10); eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(off, 16);
   await write(cd); res.end(eocd);
+  return { skipped };
 }
 
 /** 되살릴 자료가 올인원 자료 모양인지 */
@@ -79,15 +84,27 @@ function readBackup(full) {
 // 저장한 뒤 이만큼 지나면 바깥 백업을 그날 파일에 새로 덮어쓴다 (저장할 때마다 복사하지 않게 모아서)
 const AGAIN_MS = 10 * 60 * 1000;
 
-export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN_MS }) {
+export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN_MS, partBytes = PART_BYTES }) {
   const stFile = path.join(dataDir, 'backup.json');
   const load = () => { try { return JSON.parse(fs.readFileSync(stFile, 'utf8')); } catch { return {}; } };
   let st = { dir: '', lastAt: 0, lastError: '', lastFile: '', lastDay: '', ...load() };
-  const persist = () => { fs.writeFileSync(`${stFile}.tmp`, JSON.stringify(st, null, 1)); fs.renameSync(`${stFile}.tmp`, stFile); };
+  const persist = () => { fs.writeFileSync(`${stFile}.tmp`, JSON.stringify(st, null, 1)); renameRetrySync(`${stFile}.tmp`, stFile); };
   const realFile = path.join(dataDir, 'real.json');
   const recDir = path.join(dataDir, 'recordings', 'real');
   const localDir = path.join(dataDir, 'backups');
   const recFiles = () => { try { return fs.readdirSync(recDir).filter((f) => AUDIO.test(f)); } catch { return []; } };
+  function parts() {
+    const size = (f) => { try { return fs.statSync(f).size; } catch { return 0; } };
+    const out = [{ entries: [], bytes: 0 }];
+    if (fs.existsSync(realFile)) out[0].entries.push({ name: 'real.json', file: realFile }), (out[0].bytes += size(realFile));
+    for (const f of recFiles().sort()) {
+      const file = path.join(recDir, f), b = size(file);
+      let cur = out[out.length - 1];
+      if (cur.entries.length && cur.bytes + b > partBytes) { cur = { entries: [], bytes: 0 }; out.push(cur); }
+      cur.entries.push({ name: `recordings/${f}`, file }); cur.bytes += b;
+    }
+    return out;
+  }
 
   function checkDir(dir) {
     const d = String(dir || '').trim();
@@ -125,12 +142,12 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
       const target = path.join(st.dir, FOLDER);
       fs.mkdirSync(path.join(target, 'recordings'), { recursive: true });
       const dst = path.join(target, `real-${day}.json`);
-      fs.copyFileSync(realFile, `${dst}.tmp`); fs.renameSync(`${dst}.tmp`, dst);
+      fs.copyFileSync(realFile, `${dst}.tmp`); renameRetrySync(`${dst}.tmp`, dst);
       let copied = 0;
       for (const f of recFiles()) {   // 녹음은 새 파일만 (이미 있으면 크기가 같을 때 건너뜀)
         const a = path.join(recDir, f), b = path.join(target, 'recordings', f);
         if (fs.existsSync(b) && fs.statSync(b).size === fs.statSync(a).size) continue;
-        fs.copyFileSync(a, `${b}.tmp`); fs.renameSync(`${b}.tmp`, b); copied++;
+        fs.copyFileSync(a, `${b}.tmp`); renameRetrySync(`${b}.tmp`, b); copied++;
       }
       const old = fs.readdirSync(target).filter((f) => /^real-\d{4}-\d{2}-\d{2}\.json$/.test(f)).sort();
       for (const f of old.slice(0, Math.max(0, old.length - KEEP_DAYS))) fs.rmSync(path.join(target, f));
@@ -159,15 +176,18 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
   return {
     view() {
       const local = (() => { try { return fs.readdirSync(localDir).filter((f) => /^(real-\d{4}-\d{2}-\d{2}|before-restore-.+)\.json$/.test(f)).map((f) => { const s = fs.statSync(path.join(localDir, f)); return { file: f, size: s.size, at: s.mtimeMs }; }).sort((a, b) => b.at - a.at); } catch { return []; } })();
-      return { dir: st.dir, lastAt: st.lastAt, lastError: st.lastError, lastFile: st.lastFile, upToDate: !!st.lastAt && changedAt() <= st.lastAt, places: backupPlaces(), local, recordings: recFiles().length };
+      return { dir: st.dir, lastAt: st.lastAt, lastError: st.lastError, lastFile: st.lastFile, upToDate: !!st.lastAt && changedAt() <= st.lastAt, places: backupPlaces(), local, recordings: recFiles().length, parts: parts().map((x) => ({ files: x.entries.length, bytes: x.bytes })) };
     },
     async setDir(dir) { st.dir = checkDir(dir); st.lastError = ''; st.lastDay = ''; persist(); return st.dir ? external(true) : { ok: true, off: true }; },
     external,
-    async download(res) {
-      const entries = [];
-      if (fs.existsSync(realFile)) entries.push({ name: 'real.json', file: realFile });
-      for (const f of recFiles()) entries.push({ name: `recordings/${f}`, file: path.join(recDir, f) });
-      res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="church-allinone-backup-${localDay()}.zip"; filename*=UTF-8''${encodeURIComponent(`라온교회올인원-백업-${localDay()}.zip`)}` });
+    /** 받을 백업 묶음 나누기: 한 파일이 PART_BYTES 를 넘지 않게 녹음을 나눠 담는다 (되살리기는 2GB까지 받으므로). 1부에는 교회 자료가 들어간다 */
+    parts,
+    async download(res, part = 0) {
+      const all = parts(), n = all.length;
+      const i = Number.isInteger(part) && part >= 0 && part < n ? part : 0;
+      const entries = all[i].entries;
+      const suffix = n > 1 ? `-${i + 1}of${n}` : '';
+      res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="church-allinone-backup-${localDay()}${suffix}.zip"; filename*=UTF-8''${encodeURIComponent(`라온교회올인원-백업-${localDay()}${n > 1 ? `-${i + 1}부(전체${n}부)` : ''}.zip`)}` });
       await streamZip(res, entries);
     },
     async restoreLocal(file) {
@@ -206,11 +226,12 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
         const tmp = path.join(dataDir, `restore-tmp-${Date.now()}`);
         try {
           unzip(buf, tmp);
-          if (!fs.existsSync(path.join(tmp, 'real.json'))) throw bad('백업 zip 안에 real.json 이 없습니다.');
-          const obj = checkRestore(JSON.parse(fs.readFileSync(path.join(tmp, 'real.json'), 'utf8')));
-          const r = await restoreObj(obj, name);
-          let rec = 0;
           const src = path.join(tmp, 'recordings');
+          const hasData = fs.existsSync(path.join(tmp, 'real.json'));
+          if (!hasData && !fs.existsSync(src)) throw bad('백업 zip 안에 real.json 이 없습니다.');
+          // 나눠 받은 백업의 2부부터는 녹음만 들어 있다: 교회 자료는 그대로 두고 녹음만 더한다
+          const r = hasData ? await restoreObj(checkRestore(JSON.parse(fs.readFileSync(path.join(tmp, 'real.json'), 'utf8'))), name) : { ok: true, recordingsOnly: true };
+          let rec = 0;
           if (fs.existsSync(src)) { fs.mkdirSync(recDir, { recursive: true }); for (const f of fs.readdirSync(src)) if (AUDIO.test(f) && !fs.existsSync(path.join(recDir, f))) { fs.copyFileSync(path.join(src, f), path.join(recDir, f)); rec++; } }
           return { ...r, recordings: rec };
         } finally { fs.rmSync(tmp, { recursive: true, force: true }); }

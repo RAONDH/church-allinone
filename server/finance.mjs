@@ -54,7 +54,7 @@ export function cleanTx(b, db) {
   if (!category) throw Object.assign(new Error('항목을 골라 주세요.'), { code: 400 });
   if (!amount) throw Object.assign(new Error('금액을 1원 이상 넣어 주세요.'), { code: 400 });
   const name = str(b.name, 60).trim();
-  const memberId = type === 'income' ? (b.memberId && db.members?.[b.memberId] ? b.memberId : matchMember(db, name)) : '';
+  const memberId = type === 'income' ? (b.memberId && db.members && Object.prototype.hasOwnProperty.call(db.members, b.memberId) ? b.memberId : matchMember(db, name)) : '';
   return { date, type, fund, category, name, memberId, amount, note: str(b.note, 300) };
 }
 
@@ -180,7 +180,11 @@ export async function financeApi({ sub, req, res, url, db, save, body, send, Htt
       if (to !== name && list.includes(to)) throw new HttpError(400, `'${to}' 항목이 이미 있습니다.`);
       list[i] = to;
       for (const t of used(name)) { t.category = to; t.updatedAt = Date.now(); }
-      for (const y of Object.values(f.budgets)) if (y[name] !== undefined && y[to] === undefined) { y[to] = y[name]; delete y[name]; }
+      for (const y of Object.values(f.budgets)) {
+        if (y[name] !== undefined && y[to] === undefined) { y[to] = y[name]; delete y[name]; }
+        const a = `${type}/${b.fund}/${name}`, z = `${type}/${b.fund}/${to}`;   // 새 방식 예산 칸도 함께 옮긴다
+        if (y[a] !== undefined && y[z] === undefined) { y[z] = y[a]; delete y[a]; }
+      }
     } else if (b.op === 'move') {
       const i = list.indexOf(name), j = i + (b.dir < 0 ? -1 : 1);
       if (i >= 0 && j >= 0 && j < list.length) [list[i], list[j]] = [list[j], list[i]];
@@ -194,7 +198,8 @@ export async function financeApi({ sub, req, res, url, db, save, body, send, Htt
   if ((q = s(/^\/finance\/budgets\/(\d{4})$/)) && req.method === 'PUT') {
     const b = await body(req);
     const out = {};
-    for (const [k, v] of Object.entries(b.budgets || {})) if (won(v)) out[str(k, 40)] = won(v);
+    // 칸 이름: '수입·지출/재정/항목' 또는 예전처럼 항목 이름만
+    for (const [k, v] of Object.entries(b.budgets || {})) if (won(v) && k !== '__proto__') out[str(k, 120)] = won(v);
     f.budgets[q[1]] = out;
     await save();
     send(res, 200, { budgets: out });

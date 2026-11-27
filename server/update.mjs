@@ -11,6 +11,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { cmpVer } from './boot.mjs';
 import { TRUSTED_KEYS } from './update-keys.mjs';
+import { renameRetrySync } from './fsx.mjs';
 
 const REPO = 'RAONDH/church-allinone';
 // 시험할 때만 가짜 배포 서버를 쓸 수 있게 환경 변수로 바꿀 수 있다 (이 컴퓨터에서 켤 때 정하는 값)
@@ -113,7 +114,7 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
   const stFile = path.join(dataDir, 'update.json');
   const load = () => { try { return JSON.parse(fs.readFileSync(stFile, 'utf8')); } catch { return {}; } };
   let saved = { notify: true, ...load() };
-  const persist = () => { const t = `${stFile}.tmp`; fs.writeFileSync(t, JSON.stringify(saved, null, 1)); fs.renameSync(t, stFile); };
+  const persist = () => { const t = `${stFile}.tmp`; fs.writeFileSync(t, JSON.stringify(saved, null, 1)); renameRetrySync(t, stFile); };
   let job = { phase: 'idle', done: 0, total: 0, error: '', version: '' };
   let checking = null;
 
@@ -133,7 +134,8 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
         };
         saved.checkError = '';
       } catch (e) { saved.checkError = e.cause ? '인터넷에 연결하지 못했습니다.' : e.message; }
-      saved.checkedAt = Date.now(); persist(); checking = null;
+      // 상태 저장에 실패해도 다음 확인이 막히지 않게 checking 은 반드시 비운다
+      try { saved.checkedAt = Date.now(); persist(); } finally { checking = null; }
     })();
     return checking;
   }
@@ -192,13 +194,13 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
       // 3) 제자리로 옮기고, 그다음에야 current 표시를 바꾼다
       const final = path.join(dir, ver);
       fs.rmSync(final, { recursive: true, force: true });
-      fs.renameSync(tmp, final);
+      renameRetrySync(tmp, final);
       const cur = path.join(dir, 'current.json');
       const prev = fs.existsSync(cur) ? fs.readFileSync(cur, 'utf8') : '';
       fs.writeFileSync(`${cur}.tmp`, JSON.stringify({ version: ver, at: Date.now(), from: version }));
-      fs.renameSync(`${cur}.tmp`, cur);
+      renameRetrySync(`${cur}.tmp`, cur);
       fs.rmSync(dl, { force: true });
-      for (const d of fs.readdirSync(dir)) if (d !== ver && /^\d/.test(d)) fs.rmSync(path.join(dir, d), { recursive: true, force: true });   // 옛 받은 버전 정리
+      // 옛 받은 버전은 여기서 지우지 않는다: 지금 돌고 있는 본체일 수 있고, 새 버전이 안 켜지면 되돌아갈 곳이다 (새 본체가 끝까지 켜진 뒤 pruneOldVersions 가 정리)
       job.phase = 'restarting';
       // 4) 새 본체로 다시 켜기 (안 켜지면 current 를 되돌린다)
       setTimeout(() => restart(ver).catch((e) => {
@@ -218,4 +220,19 @@ export function makeUpdater({ dataDir, version, appRoot, isBusy = () => '', rest
     snooze(v) { saved.snooze = { version: String(v || ''), until: Date.now() + SNOOZE }; persist(); },
     setNotify(on) { saved.notify = !!on; persist(); },
   };
+}
+
+/**
+ * 새 본체가 끝까지 켜진 뒤 부른다: 지금 돌고 있는 버전(keep)과 current.json 이 가리키는 버전만 남기고 옛 받은 버전을 지운다.
+ * (설치하는 순간 지우면, 새 버전이 안 켜졌을 때 되돌아갈 본체 폴더가 이미 없다)
+ */
+export function pruneOldVersions(dataDir, keep) {
+  const dir = path.join(dataDir, 'app-update');
+  let cur = '';
+  try { cur = JSON.parse(fs.readFileSync(path.join(dir, 'current.json'), 'utf8')).version || ''; } catch { /* 없음 */ }
+  let removed = [];
+  try {
+    for (const d of fs.readdirSync(dir)) if (/^\d/.test(d) && d !== keep && d !== cur) { fs.rmSync(path.join(dir, d), { recursive: true, force: true }); removed.push(d); }
+  } catch { /* 폴더 없음 */ }
+  return removed;
 }

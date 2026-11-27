@@ -32,6 +32,49 @@ describe('배포 스크립트', () => {
   });
 });
 
+describe('배포 안전장치', () => {
+  // 임시 저장소에 릴리스 스크립트만 두고 돌린다 (점검·묶음 만들기 앞에서 멈춰야 함)
+  const fakeRepo = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'allinone-rel-'));
+    fs.mkdirSync(path.join(d, 'installer'));
+    fs.copyFileSync(path.join(HUB, 'installer', 'make-release.sh'), path.join(d, 'installer', 'make-release.sh'));
+    fs.writeFileSync(path.join(d, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+    const git = (...a: string[]) => spawnSync('git', ['-C', d, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { encoding: 'utf8' });
+    git('init', '-q'); git('add', '-A'); git('commit', '-qm', 'x');
+    return { d, git, run: () => spawnSync('bash', [path.join(d, 'installer', 'make-release.sh'), path.join(d, 'out')], { encoding: 'utf8', env: { ...process.env, ALLOW_DIRTY: '' } }) };
+  };
+  it('커밋하지 않은 변경이 있거나 같은 버전 태그가 이미 있으면 릴리스 파일을 만들지 않는다', () => {
+    const r = fakeRepo();
+    try {
+      fs.writeFileSync(path.join(r.d, 'new.txt'), 'x');
+      const a = r.run();
+      expect([a.status, /커밋하지 않은 변경/.test(a.stdout)]).toEqual([1, true]);
+      fs.rmSync(path.join(r.d, 'new.txt'));
+      r.git('tag', 'v1.2.3');
+      const b = r.run();
+      expect([b.status, /v1\.2\.3 태그가 이미 있습니다/.test(b.stdout)]).toEqual([1, true]);
+      expect(fs.existsSync(path.join(r.d, 'out'))).toBe(false);
+    } finally { fs.rmSync(r.d, { recursive: true, force: true }); }
+  });
+  it('package-lock.json 의 버전이 package.json 과 같다 (버전을 올릴 때 함께)', () => {
+    const v = JSON.parse(fs.readFileSync(path.join(HUB, 'package.json'), 'utf8')).version;
+    const lock = JSON.parse(fs.readFileSync(path.join(HUB, 'package-lock.json'), 'utf8'));
+    expect([lock.version, lock.packages[''].version]).toEqual([v, v]);
+  });
+  it('바깥 부품(HWP 변환기)은 고정한 커밋으로 받는다 (main 을 그대로 받지 않음)', () => {
+    for (const f of ['make-package.sh', 'make-windows.sh']) {
+      expect(sh(f)).not.toMatch(/refs\/heads\/main/);
+      expect(sh(f)).toMatch(/pins\.sh/);
+    }
+    expect(sh('pins.sh')).toMatch(/HWP_COMMIT="[0-9a-f]{40}"/);
+  });
+  it('--if-needed 지문에 배포·실행 스크립트도 들어가고, 점검 중 코드가 바뀌면 통과로 기록하지 않는다', () => {
+    const run = fs.readFileSync(path.join(HUB, 'tests', 'run.js'), 'utf8');
+    for (const x of ["'installer'", "'start.sh'", "'.command'", "'package-lock.json'"]) expect(run).toContain(x);
+    expect(run).toMatch(/fp1 === fp0/);
+  });
+});
+
 describe('윈도우 점검·실행 파일', () => {
   it('GitHub Actions 가 윈도우·맥에서 전체 점검을 돌리고, 윈도우에서는 묶음 실행 시험도 돈다', () => {
     const y = fs.readFileSync(path.join(HUB, '.github', 'workflows', 'verify.yml'), 'utf8');

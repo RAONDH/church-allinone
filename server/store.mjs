@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { renameRetry } from './fsx.mjs';
 
 export const uid = () => crypto.randomBytes(6).toString('hex');
 
@@ -48,7 +49,7 @@ export function openStore(dataDir, ws, { onSaved } = {}) {
         if (!skipBackup) backup();
         const tmp = `${file}.tmp`;
         await fs.promises.writeFile(tmp, JSON.stringify(db, null, 1));
-        await fs.promises.rename(tmp, file);
+        await renameRetry(tmp, file);
       } catch (e) {
         Object.assign(st, { lastError: e.message, lastErrorAt: Date.now() });
         console.error('자료 저장 실패:', e.message);

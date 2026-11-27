@@ -18,21 +18,26 @@ process.chdir(HUB);
 function fingerprint() {
   const h = crypto.createHash('sha256');
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { h.update(path.relative(HUB, p)); h.update(fs.readFileSync(p)); } } };
-  for (const d of ['server', 'src', 'tests', 'public']) if (fs.existsSync(d)) walk(d);
-  for (const f of ['apps.json', 'package.json', 'index.html', 'vite.config.ts', 'tsconfig.json']) if (fs.existsSync(f)) { h.update(f); h.update(fs.readFileSync(f)); }
+  // 배포·실행 스크립트(installer·start.sh·.command)도 점검 대상이다 (installer.test·launcher.test 가 이 파일들을 확인한다)
+  for (const d of ['server', 'src', 'tests', 'public', 'installer', '.github']) if (fs.existsSync(d)) walk(d);
+  const files = ['apps.json', 'package.json', 'package-lock.json', 'index.html', 'vite.config.ts', 'tsconfig.json', 'start.sh', ...fs.readdirSync('.').filter((f) => f.endsWith('.command')).sort()];
+  for (const f of files) if (fs.existsSync(f)) { h.update(f); h.update(fs.readFileSync(f)); }
   return h.digest('hex');
 }
 if (process.argv.includes('--if-needed')) {
   try { const s = JSON.parse(fs.readFileSync(STAMP, 'utf8')); if (s.fp === fingerprint() && s.ok) { console.log(`✓ 같은 코드로 이미 전체 점검 ${s.passed}/${s.total} 통과 (${new Date(s.at).toLocaleString('ko-KR')}) — 다시 돌리지 않습니다.`); process.exit(0); } } catch { /* 처음 */ }
 }
 
+// 지문은 점검을 시작할 때 잰다. 점검하는 동안 코드가 바뀌면(다른 작업이 함께 고치는 경우) 통과로 기록하지 않는다
+const fp0 = fingerprint();
 const all = [];
 const step = (name, fn) => { const t0 = Date.now(); const r = fn(); all.push({ name, ...r }); console.log(`${r.ok ? '  ✓' : '  ✗'} ${name} (${Date.now() - t0}ms)${r.ok ? '' : `\n      ${String(r.error).split('\n').slice(0, 15).join('\n      ')}`}`); return r.ok; };
 const sh = (cmd, args) => spawnSync(cmd, args, { cwd: HUB, encoding: 'utf8', env: process.env, shell: process.platform === 'win32' });
 
 // 실제 자료에 시험 자료가 섞이지 않았는지 보려고 점검에서 쓰는 글자 (켜져 있는 프로그램이 그사이 저장해도 오탐하지 않게)
-const MARKS = ['시험교회', '화면시험', '김시험', '시험모임', '바뀐헌금'];
-const realFiles = ['data/real.json', 'data/sample.json'].filter((f) => fs.existsSync(f));
+const MARKS = ['시험교회', '화면시험', '김시험', '시험모임', '바뀐헌금', '시험 목사', '닫기시험성도', '고르기시험성도', '읽는금액성도', '못읽는금액성도', '바로떠나기 시험', '한 시간 분량 녹취록이라고', '저장 시험', '보안 시험'];
+// data 폴더의 모든 자료 파일(real·sample·예제 예배송출·업데이트 상태 등)을 본다
+const realFiles = fs.existsSync('data') ? fs.readdirSync('data').filter((f) => f.endsWith('.json')).map((f) => `data/${f}`) : [];
 const already = Object.fromEntries(realFiles.map((f) => [f, MARKS.filter((m) => fs.readFileSync(f, 'utf8').includes(m))]));
 
 console.log('\n▶ 준비');
@@ -64,8 +69,9 @@ const { runUi } = await import('./harness/ui.mjs');
 all.push(...(await runUi()));
 
 console.log('\n▶ 마무리');
-step('실제 자료를 건드리지 않았다 (data/real.json · sample.json 에 시험 자료가 없다)', () => {
-  const leaked = realFiles.flatMap((f) => MARKS.filter((m) => !already[f].includes(m) && fs.readFileSync(f, 'utf8').includes(m)).map((m) => `${f}: "${m}"`));
+step('실제 자료를 건드리지 않았다 (data 폴더의 자료 파일에 시험 자료가 없다)', () => {
+  const now = fs.existsSync('data') ? fs.readdirSync('data').filter((f) => f.endsWith('.json')).map((f) => `data/${f}`) : [];
+  const leaked = now.flatMap((f) => { let t = ''; try { t = fs.readFileSync(f, 'utf8'); } catch { return []; } return MARKS.filter((m) => !(already[f] || []).includes(m) && t.includes(m)).map((m) => `${f}: "${m}"`); });
   return { ok: !leaked.length, error: `시험 자료가 실제 자료에 들어갔습니다: ${leaked.join(', ')}` };
 });
 
@@ -73,5 +79,7 @@ const passed = all.filter((x) => x.ok).length, total = all.length;
 const failed = all.filter((x) => !x.ok);
 console.log(`\n${failed.length ? '✗' : '✓'} 점검 ${passed}/${total} 통과${failed.length ? `\n  실패:\n${failed.map((f) => `   - ${f.name}`).join('\n')}` : ''}`);
 fs.mkdirSync(path.dirname(STAMP), { recursive: true });
-fs.writeFileSync(STAMP, JSON.stringify({ fp: fingerprint(), ok: !failed.length, passed, total, at: Date.now() }));
+const fp1 = fingerprint();
+if (fp1 !== fp0) console.log('⚠️ 점검하는 동안 코드가 바뀌어 이번 결과를 "통과"로 기록하지 않습니다. 다시 돌려 주세요.');
+fs.writeFileSync(STAMP, JSON.stringify({ fp: fp0, ok: !failed.length && fp1 === fp0, passed, total, at: Date.now() }));
 process.exit(failed.length ? 1 : 0);

@@ -6,6 +6,16 @@ set -euo pipefail
 HUB="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="$(node -p "require('$HUB/package.json').version")"
 OUT="${1:-$HOME/Desktop/릴리스-$VERSION}"
+# 배포 파일은 커밋한 코드 그대로여야 하고, 이미 낸 버전 번호로 다시 내면 안 된다
+# (같은 번호면 설치된 프로그램이 새 것으로 알아보지 못해 업데이트가 오지 않는다). 급할 때만 ALLOW_DIRTY=1 로 건너뜀
+if [ -z "${ALLOW_DIRTY:-}" ] && [ -d "$HUB/.git" ]; then
+  if [ -n "$(git -C "$HUB" status --porcelain --untracked-files=normal)" ]; then
+    echo "✗ 커밋하지 않은 변경이 있어 릴리스 파일을 만들지 않습니다. 먼저 커밋해 주세요:"; git -C "$HUB" status --short | head -20; exit 1
+  fi
+  if git -C "$HUB" rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+    echo "✗ v$VERSION 태그가 이미 있습니다. package.json 의 버전을 올린 뒤 다시 만들어 주세요."; exit 1
+  fi
+fi
 mkdir -p "$OUT"
 # 배포 전 전체 점검(하네스): 실패하면 아무 파일도 만들지 않는다
 node "$HUB/tests/run.js" --if-needed || { echo "✗ 점검이 실패해서 릴리스 파일을 만들지 않습니다."; exit 1; }

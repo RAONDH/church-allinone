@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, ApiError } from './lib/api';
+import { installDialogA11y } from './lib/a11y';
 import Recovery from './pages/Recovery';
 import type { AppInfo, Overview, Ws } from './lib/types';
 import Home from './pages/Home';
@@ -32,6 +33,7 @@ export default function App() {
   const [ovState, setOv] = useState<(Overview & { ws: Ws }) | null>(null);
   const ov = ovState?.ws === ws ? ovState : null;   // 작업 공간을 바꾸는 순간 이전 자료가 잠깐 보이지 않게
   const [loadError, setLoadError] = useState('');
+  useEffect(() => installDialogA11y(), []);   // 창: Escape 로 닫기·초점 옮기기·제목 잇기
   // 실제 교회 자료 파일이 깨졌으면(서버가 503·broken 으로 알림) 복구 화면을 띄운다
   const [broken, setBroken] = useState(false);
   const base = `/api/ws/${ws}`;
@@ -221,8 +223,8 @@ export function Settings() {
       </div>
       {ws === 'real' && <BackupCard />}
       {ws === 'real' && <LockSettings />}
-      <AiCard />
-      <UpdateSettings />
+      <AiCard readOnly={ws === 'sample'} />
+      <UpdateSettings readOnly={ws === 'sample'} />
       <Support />
       {ws === 'sample' && (
         <div className="card"><h2>예제 자료</h2><button onClick={resetSample}>예제 자료 처음 상태로</button></div>
@@ -231,7 +233,7 @@ export function Settings() {
   );
 }
 
-function UpdateSettings() {
+function UpdateSettings({ readOnly = false }: { readOnly?: boolean }) {
   const { upd, setUpd, reloadUpd } = useApp();
   const [msg, setMsg] = useState('');
   const toggle = async (on: boolean) => {
@@ -246,7 +248,8 @@ function UpdateSettings() {
     <div className="card">
       <h2>업데이트</h2>
       <p>지금 버전: <b>v{upd?.current || '…'}</b></p>
-      <label className="check"><input type="checkbox" checked={upd?.notify !== false} onChange={(e) => toggle(e.target.checked)} />새 버전이 나오면 알려 주기</label>
+      <label className="check"><input type="checkbox" disabled={readOnly} checked={upd?.notify !== false} onChange={(e) => toggle(e.target.checked)} />새 버전이 나오면 알려 주기</label>
+      {readOnly && <p className="muted small">업데이트 알림은 프로그램 전체 설정이라 예제 화면에서는 바꿀 수 없습니다. 실제 교회 화면의 설정에서 바꿔 주세요.</p>}
       <p className="muted small">6시간에 한 번 GitHub에서 새 버전을 확인합니다. 끄면 안내 창이 저절로 뜨지 않고, 위쪽 🔔 새 버전 단추로만 보입니다.</p>
       <div className="row"><button onClick={checkNow}>지금 확인</button>{msg && <span className="muted small">{msg}</span>}</div>
     </div>

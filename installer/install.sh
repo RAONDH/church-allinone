@@ -70,8 +70,10 @@ else
   copy_dir "$PKG/교회 올인원" "$HUB" data node_modules dist || fail "라온 교회 올인원을 복사하지 못했습니다."
 fi
 cd "$HUB" || fail "$HUB 폴더로 들어가지 못했습니다."
-echo "  부품 설치 중 (npm install)…"
-npm install --no-audit --no-fund >>"$LOG" 2>&1 || fail "라온 교회 올인원 부품 설치(npm install)에 실패했습니다."
+echo "  부품 설치 중 (npm ci)…"
+# 점검한 그대로의 부품 버전으로 설치 (package-lock.json 이 있으면 npm ci, 없으면 npm install)
+if [ -f package-lock.json ]; then NPM_INSTALL="ci"; else NPM_INSTALL="install"; fi
+npm "$NPM_INSTALL" --no-audit --no-fund >>"$LOG" 2>&1 || fail "라온 교회 올인원 부품 설치(npm $NPM_INSTALL)에 실패했습니다."
 echo "  화면 만드는 중 (build)…"
 npx vite build >>"$LOG" 2>&1 || fail "라온 교회 올인원 화면 만들기(build)에 실패했습니다."
 chmod +x "$HUB/start.sh" "$HUB/교회 올인원 열기.command" 2>/dev/null

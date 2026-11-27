@@ -241,6 +241,8 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
   const [auto, setAuto] = useState(true);
   const [text, setText] = useState('');
   const recRef = useRef<Recorder | null>(null);
+  // 붙여 넣은 녹취록·적어 둔 참석자가 있으면 바깥을 눌러 닫기 전에 묻는다 (다 보낸 뒤에는 묻지 않음)
+  const g = useGuardedClose(onClose, () => mode !== 'done' && !!(text.trim() || info.attendees.trim() || info.title.trim()));
   const ready = sttReady(st);
   // 녹음 조각 저장: 녹음을 시작하면 회의록을 먼저 만들고, 30초마다 서버에 이어 붙인다 (창이 닫혀도 저장된 데까지 남음)
   const mRef = useRef<string>('');
@@ -356,7 +358,7 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
   };
 
   return (
-    <div className="dialog-back" onClick={mode === 'recording' || mode === 'sending' ? undefined : onClose}>
+    <div className="dialog-back" onClick={mode === 'recording' || mode === 'sending' ? undefined : g.close}>
       <div className="dialog wide" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal>
         <h2>녹음으로 회의록 만들기</h2>
         <div className="form-grid">
@@ -405,7 +407,7 @@ function RecorderDialog({ types, st, onSetup, onClose, reload }: { types: string
         )}
         {(mode === 'sending' || mode === 'done') && <p className={mode === 'done' ? 'alert info' : 'muted'}>{msg}</p>}
         {err && <p className="alert err">{err}</p>}
-        {mode !== 'recording' && mode !== 'sending' && <div className="row end"><button onClick={onClose}>닫기</button></div>}
+        {mode !== 'recording' && mode !== 'sending' && <div className="row end"><button onClick={g.close}>닫기</button></div>}
       </div>
     </div>
   );

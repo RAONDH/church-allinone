@@ -38,7 +38,8 @@ SHORTS_TAG="$(gh release view -R "$SHORTS_REPO" --json tagName -q .tagName 2>/de
 echo "▶ 설교 쇼츠 제작 ($SHORTS_TAG, 공개 저장소)"
 fetch_src "$SHORTS_REPO" "refs/tags/$SHORTS_TAG" "$WORK/apps/sermon-shorts-maker" || { echo "설교 쇼츠 제작을 받지 못했습니다"; exit 1; }
 echo "▶ HWP/PDF 변환기 (공개 저장소)"
-fetch_src "raon-easypaster/hwp-pdf-to-markdown" "refs/heads/main" "$WORK/apps/hwp-pdf-to-markdown" || { echo "HWP/PDF 변환기를 받지 못했습니다"; exit 1; }
+. "$HUB/installer/pins.sh"
+fetch_src "$HWP_REPO" "$HWP_COMMIT" "$WORK/apps/hwp-pdf-to-markdown" || { echo "HWP/PDF 변환기를 받지 못했습니다"; exit 1; }
 
 cp "$HUB/installer/install.sh" "$WORK/설치하기.command"
 chmod +x "$WORK/설치하기.command"

@@ -69,16 +69,25 @@ export async function startHub({ env = {}, name = 'hub', prepare } = {}) {
     ...env,
   };
   delete fullEnv.HUB_APP_ROOT; delete fullEnv.BUNDLE_DIR; if (!env.GEMINI_API_KEY) delete fullEnv.GEMINI_API_KEY;
+  // 프로그램 목록도 기본으로 시험용 (실제 apps.json 을 쓰면 '프로그램' 화면이 켜져 있는 예배송출·PraiseFlow 포트에 요청을 보낸다)
+  if (!env.HUB_APPS_FILE) {
+    const appsFile = path.join(dataDir, 'test-apps.json');
+    fs.writeFileSync(appsFile, JSON.stringify([{ id: 'fake', name: '시험 프로그램', desc: '점검용 (닫힌 포트)', icon: '🧪', color: '#000', port: closed, dir: dataDir, start: 'true', win: { dir: dataDir, run: ['node', '-e', '0'] } }]));
+    fullEnv.HUB_APPS_FILE = appsFile;
+  }
   if (prepare) await prepare(dataDir);
   const out = [];
   const child = spawn(process.execPath, [path.join(HUB, 'server', 'index.mjs')], { cwd: HUB, env: fullEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', (c) => out.push(String(c))); child.stderr.on('data', (c) => out.push(String(c)));
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 80; i++) {
-    try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* 켜지는 중 */ }
+  let up = false;
+  for (let i = 0; i < 80 && !up; i++) {
+    try { if ((await fetch(`${base}/api/health`)).ok) { up = true; break; } } catch { /* 켜지는 중 */ }
     if (child.exitCode !== null) throw new Error(`시험 서버가 켜지지 않았습니다:\n${out.join('')}`);
     await sleep(150);
   }
+  // 12초가 지나도 답이 없으면 여기서 멈춘다 (그대로 넘어가면 뒤 점검들이 엉뚱한 이유로 실패한다)
+  if (!up) { try { child.kill(); } catch { /* 이미 끝남 */ } throw new Error(`시험 서버가 12초 안에 답하지 않았습니다:\n${out.join('').slice(-2000)}`); }
   const call = async (method, p, body, headers = {}) => {
     const r = await fetch(base + p, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined });
     const ct = r.headers.get('content-type') || '';
@@ -98,8 +107,12 @@ export async function startHub({ env = {}, name = 'hub', prepare } = {}) {
     postRaw: async (p, buf, headers = {}) => { const r = await fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', ...headers }, body: buf }); const t = await r.text(); let data = t; try { data = JSON.parse(t); } catch { /* 글 */ } return { status: r.status, data }; },
     get: (p, h) => call('GET', p, undefined, h), post: (p, b = {}, h) => call('POST', p, b, h), put: (p, b = {}, h) => call('PUT', p, b, h), del: (p) => call('DELETE', p),
     async stop() {
-      try { child.kill(); } catch { /* 이미 끝남 */ }
-      await sleep(100);
+      // 서버가 정말 끝난 뒤에 폴더를 지운다 (윈도우에서는 열린 파일이 있으면 못 지움)
+      if (child.exitCode === null) {
+        const done = new Promise((ok) => child.once('exit', ok));
+        try { child.kill(); } catch { /* 이미 끝남 */ }
+        await Promise.race([done, sleep(5000)]);
+      }
       for (const d of [dataDir, logDir, sttDir]) fs.rmSync(d, { recursive: true, force: true });
     },
   };

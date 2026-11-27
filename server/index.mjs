@@ -22,7 +22,15 @@ if (pick.updated) {
     await import(pathToFileURL(pick.main).href);
   } catch (e) {
     console.error(`[업데이트] 받아 둔 버전 ${pick.version}을 켜지 못해 앱에 든 버전으로 켭니다:`, e?.message || e);
-    fs.rmSync(path.join(dataDir, 'app-update'), { recursive: true, force: true });
+    // 켜지 못한 버전만 치우고, 그 앞 버전(지금 돌고 있을 수 있는 본체)은 남긴다
+    const upd = path.join(dataDir, 'app-update'), cur = path.join(upd, 'current.json');
+    let from = '';
+    try { from = JSON.parse(fs.readFileSync(cur, 'utf8')).from || ''; } catch { /* 없음 */ }
+    fs.rmSync(path.join(upd, String(pick.version).replace(/[^\w.-]/g, '')), { recursive: true, force: true });
+    if (from && fs.existsSync(path.join(upd, from, 'server', 'main.mjs'))) {
+      fs.writeFileSync(cur, JSON.stringify({ version: from, at: Date.now(), from: '' }));
+      fs.rmSync(bootingFile(dataDir), { force: true });
+    } else fs.rmSync(upd, { recursive: true, force: true });   // 되돌아갈 받은 버전이 없으면 모두 치운다
     await import('./main.mjs');
   }
 } else {

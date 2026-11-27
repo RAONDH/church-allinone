@@ -7,6 +7,7 @@ interface BackupView {
   dir: string; lastAt: number; lastError: string; lastFile: string; upToDate: boolean; recordings: number;
   places: { dir: string; label: string }[];
   local: { file: string; size: number; at: number }[];
+  parts?: { files: number; bytes: number }[];
 }
 export const kb = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1e3))}KB`);
 export const label = (f: string) => {
@@ -38,7 +39,8 @@ export default function BackupCard() {
     if (r.result?.error) throw new Error(r.result.error);
     return `백업했습니다${r.result?.recordings ? ` (새 녹음 ${r.result.recordings}개 포함)` : ''}.`;
   });
-  const restoreDone = (r: { church: string; weeks: number; members: number; tx: number }) => {
+  const restoreDone = (r: { church: string; weeks: number; members: number; tx: number; recordingsOnly?: boolean; recordings?: number }) => {
+    if (r.recordingsOnly) return `녹음 파일 ${r.recordings || 0}개를 더했습니다 (나눠 받은 백업의 녹음 묶음이라 교회 자료는 그대로 둡니다).`;
     setTimeout(() => window.location.reload(), 1500);
     return `되살렸습니다: ${r.church || '(교회 이름 없음)'} · 예배 ${r.weeks} · 성도 ${r.members} · 장부 ${r.tx}건. 바로 앞 자료는 '되살리기 직전 자료'로 남겨 두었습니다. 화면을 새로 고칩니다…`;
   };
@@ -76,10 +78,19 @@ export default function BackupCard() {
         {v?.dir && <button disabled={busy} onClick={now}>지금 백업</button>}
         {v?.dir && <button className="link small" disabled={busy} onClick={() => { setDir(''); saveDir(''); }}>끄기</button>}
       </div>
-      <p className="muted small">정해 두면 하루 한 번(자료를 저장할 때) 그 폴더의 <code>라온교회올인원-백업</code>에 교회 자료와 새 녹음 파일을 복사하고, 60일치를 보관합니다.</p>
+      <p className="muted small">정해 두면 자료를 저장할 때(같은 날 또 고치면 10분쯤 뒤 다시) 그 폴더의 <code>라온교회올인원-백업</code>에 교회 자료와 새 녹음 파일을 복사하고, 60일치를 보관합니다.</p>
 
       <h3>백업 파일 받기</h3>
-      <p className="small"><a className="btn" href="/api/backup/download">백업 파일 받기 (.zip)</a> <span className="muted">교회 자료{v?.recordings ? `와 회의 녹음 ${v.recordings}개` : ''}를 파일 하나로 받습니다. 다른 컴퓨터로 옮길 때도 씁니다.</span></p>
+      {(v?.parts?.length || 1) > 1 ? (
+        <>
+          <p className="small muted">회의 녹음이 많아 <b>{v!.parts!.length}개 파일</b>로 나눠 받습니다 (파일 하나가 너무 크면 되살릴 수 없어서). 모두 받아 두세요. 되살릴 때는 <b>1부를 먼저</b>, 그다음 나머지를 차례로 고르면 녹음이 더해집니다.</p>
+          <div className="row wrap backup-parts">
+            {v!.parts!.map((x, i) => <a key={i} className="btn small" href={`/api/backup/download?part=${i}`}>{i + 1}부 받기 <span className="muted">({i === 0 ? '교회 자료' : '녹음'}{x.files - (i === 0 ? 1 : 0) > 0 ? `${i === 0 ? '+녹음' : ''} ${x.files - (i === 0 ? 1 : 0)}개` : ''} · {kb(x.bytes)})</span></a>)}
+          </div>
+        </>
+      ) : (
+        <p className="small"><a className="btn" href="/api/backup/download">백업 파일 받기 (.zip)</a> <span className="muted">교회 자료{v?.recordings ? `와 회의 녹음 ${v.recordings}개` : ''}를 파일 하나로 받습니다. 다른 컴퓨터로 옮길 때도 씁니다.</span></p>
+      )}
 
       <h3>되살리기</h3>
       <label className="btn small backup-file">받아 둔 백업 파일(.zip·.json)에서 되살리기<input type="file" hidden accept=".zip,.json" onChange={(e) => { const f = e.target.files?.[0]; if (f) restoreFile(f); e.target.value = ''; }} /></label>

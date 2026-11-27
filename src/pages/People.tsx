@@ -8,6 +8,7 @@ import { absentees, attendanceWeeks, ageOf, HIST_LABEL, memberHistory, type Hist
 import { fmtDate, ymd } from '../lib/week';
 import { WeekEvents } from './Admin';
 import { WeekServe } from './ServeTab';
+import { clickable } from '../lib/a11y';
 
 const TABS = [['list', '성도 명부'], ['visits', '심방'], ['attendance', '출석']] as const;
 type Tab = (typeof TABS)[number][0];
@@ -274,7 +275,7 @@ function VisitList({ data, visits, onEdit }: { data: PeopleData; visits: Visit[]
   return (
     <ul className="visit-list">
       {visits.map((v) => (
-        <li key={v.id} onClick={() => onEdit(v)}>
+        <li key={v.id} {...clickable(() => onEdit(v))}>
           <span className="muted">{fmtDate(v.date)}</span>
           <span className={`pill ${v.planned ? 'todo' : 'done'}`}>{v.planned ? '예정' : v.kind}</span>
           <b>{names(data, v.memberIds)}</b>
@@ -319,7 +320,8 @@ function Visits({ data, reload }: { data: PeopleData; reload: () => Promise<void
 const addMonths = (s: string, n: number) => { const d = new Date(s + 'T00:00:00'); d.setMonth(d.getMonth() + n); return ymd(d); };
 
 function VisitDialog({ data, visit, preset, onClose, reload }: { data: PeopleData; visit: Visit | null; preset: string[]; onClose: () => void; reload: () => Promise<void> }) {
-  const g = useGuardedClose(onClose);
+  // 대상 성도를 단추(×·가족도 함께)로만 바꿔도 '바뀜'으로 본다
+  const g = useGuardedClose(onClose, () => JSON.stringify(f.memberIds) !== JSON.stringify(visit?.memberIds || preset));
   const { base } = useApp();
   const today = ymd(new Date());
   const [f, setF] = useState({ memberIds: visit?.memberIds || preset, date: visit?.date || today, kind: visit?.kind || '심방', planned: visit?.planned ?? false, note: visit?.note || '' });
@@ -392,16 +394,35 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
   const [sel, setSel] = useState<Set<string>>(new Set(data.attendance[date] || []));
   const [msg, setMsg] = useState('');
   const [dirty, setDirty] = useState(false);
-  useEffect(() => { setSel(new Set(data.attendance[date] || [])); setDirty(false); setMsg(''); }, [date, data.attendance]);
+  // 저장하지 않은 체크는 날짜마다 이 컴퓨터에 보관한다: 날짜를 바꾸거나 다른 화면에 다녀와도 사라지지 않게
+  const draftKey = (d: string) => `att-draft:${base}:${d}`;
+  const readDraft = (d: string): string[] | null => { try { const x = JSON.parse(localStorage.getItem(draftKey(d)) || 'null'); return Array.isArray(x) ? x : null; } catch { return null; } };
+  const writeDraft = (d: string, ids: string[] | null) => { try { if (ids) localStorage.setItem(draftKey(d), JSON.stringify(ids)); else localStorage.removeItem(draftKey(d)); } catch { /* 보관 못 해도 계속 */ } };
+  useEffect(() => {
+    const kept = readDraft(date);
+    if (kept) { setSel(new Set(kept)); setDirty(true); setMsg('저장하지 않은 출석 체크를 다시 불러왔습니다. [출석 저장]을 눌러 주세요.'); }
+    else { setSel(new Set(data.attendance[date] || [])); setDirty(false); setMsg(''); }
+  }, [date, data.attendance]);
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
   const people = data.members.filter((m) => isCurrent(m) || sel.has(m.id));
   const byGroup = useMemo(() => {
     const g: Record<string, typeof people> = {};
     for (const m of [...people].sort((a, b) => a.name.localeCompare(b.name, 'ko'))) (g[m.group || '구역 없음'] ||= []).push(m);
     return Object.entries(g).sort(([a], [b]) => (a === '구역 없음' ? 1 : b === '구역 없음' ? -1 : a.localeCompare(b, 'ko')));
   }, [people]);
-  const toggle = (id: string) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setSel(s); setDirty(true); };
+  const toggle = (id: string) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setSel(s); setDirty(true); writeDraft(date, [...s]); };
   const save = async () => {
-    try { await api(`${base}/attendance/${date}`, { method: 'PUT', body: { memberIds: [...sel] } }); await reload(); setMsg('저장했습니다.'); setDirty(false); } catch (e: any) { setMsg(e.message); }
+    try { await api(`${base}/attendance/${date}`, { method: 'PUT', body: { memberIds: [...sel] } }); writeDraft(date, null); await reload(); setMsg('저장했습니다.'); setDirty(false); return true; } catch (e: any) { setMsg(e.message); return false; }
+  };
+  // 저장하지 않은 체크가 있는데 날짜를 바꾸려 하면 먼저 저장할지 묻는다 (취소해도 체크는 그 날짜에 보관됨)
+  const changeDate = async (d: string) => {
+    if (!d || d === date) return;
+    if (dirty && confirm(`${date} 출석 체크를 아직 저장하지 않았습니다. 지금 저장하고 날짜를 바꿀까요?\n(취소하면 저장하지 않은 체크는 그 날짜에 보관해 두고 날짜만 바꿉니다)`)) { if (!(await save())) return; }
+    setDate(d);
   };
   const recent = Object.keys(data.attendance).sort().slice(-8);
   const absent = absentees(data, today, 3);
@@ -410,7 +431,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
     <div className="grid2 wide-left">
       <div className="card">
         <div className="row between">
-          <label className="inline">예배 날짜<input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label className="inline">예배 날짜<input type="date" value={date} onChange={(e) => changeDate(e.target.value)} /></label>
           <span><b>{sel.size}</b>명 출석</span>
         </div>
         {byGroup.map(([g, ms]) => (
@@ -440,7 +461,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
           <h3>최근 출석</h3>
           {recent.length ? (
             <ul className="plain att-recent">
-              {[...recent].reverse().map((d) => <li key={d}><button className="link" onClick={() => setDate(d)}>{fmtDate(d)}</button> <b>{data.attendance[d].length}</b>명</li>)}
+              {[...recent].reverse().map((d) => <li key={d}><button className="link" onClick={() => changeDate(d)}>{fmtDate(d)}</button> <b>{data.attendance[d].length}</b>명</li>)}
             </ul>
           ) : <p className="muted small">아직 기록이 없습니다.</p>}
         </div>

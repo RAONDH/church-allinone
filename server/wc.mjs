@@ -4,6 +4,7 @@
 // 예제 자료: 실제 예배송출을 건드리지 않도록 같은 규칙으로 움직이는 '가상 예배송출'을 파일 하나로 흉내 낸다.
 import fs from 'node:fs';
 import { uid } from './store.mjs';
+import { renameRetrySync } from './fsx.mjs';
 
 const SONG_TYPES = new Set(['song', 'score']);
 
@@ -46,8 +47,16 @@ const SUNDAY_STEPS = [
 export const TEMPLATES = [['sunday', '주일 예배'], ['', '빈 순서']];
 
 export function memoryWc(file, seed) {
-  let db = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : seed();
-  const save = () => fs.writeFileSync(file, JSON.stringify(db, null, 1));
+  // 예제 파일이 깨져도 프로그램 전체가 켜지지 않는 일이 없게: 깨진 파일은 옆에 남기고 예제를 새로 만든다
+  let db;
+  try { db = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : seed(); }
+  catch (e) {
+    try { fs.renameSync(file, `${file}.broken-${Date.now()}`); } catch { /* 옮기지 못해도 계속 */ }
+    console.error('[예제] 가상 예배송출 파일이 깨져 예제를 새로 만듭니다:', e.message);
+    db = seed();
+  }
+  // 임시 파일에 쓰고 이름을 바꿔, 쓰는 중 꺼져도 파일이 잘리지 않게
+  const save = () => { fs.writeFileSync(`${file}.tmp`, JSON.stringify(db, null, 1)); renameRetrySync(`${file}.tmp`, file); };
   const ok = (v) => Promise.resolve(structuredClone(v));
   function addItem(b) {
     const it = {

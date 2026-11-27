@@ -6,7 +6,8 @@ import { api } from '../lib/api';
 interface Sub { installed: boolean; loggedIn: boolean }
 export interface AiStatus { provider: string | null; label: string; claude: Sub; codex: Sub; gemini: Sub }
 
-export default function AiCard() {
+/** readOnly: 예제 화면. AI 연결은 예제와 실제 교회가 함께 쓰는 프로그램 전체 설정이라 예제에서는 보기만 한다 */
+export default function AiCard({ readOnly = false }: { readOnly?: boolean }) {
   const [st, setSt] = useState<AiStatus | null>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
@@ -34,11 +35,11 @@ export default function AiCard() {
             {row('제미나이 API 키', st.gemini, '아래에 키를 넣기 (PraiseFlow와 함께 씀)')}
           </ul>
           <p className="small">지금 쓰는 AI: <b>{st.label || '없음'}</b> <button className="link" onClick={() => load(true)}>다시 확인</button></p>
-          <div className="row wrap">
+          {readOnly ? <p className="alert info small">AI 연결은 예제와 실제 교회가 함께 쓰는 <b>프로그램 전체 설정</b>입니다. 예제 화면에서는 바꿀 수 없고, 실제 교회 화면의 설정에서 바꿉니다.</p> : <div className="row wrap">
             <input className="grow" type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={st.gemini?.loggedIn ? '제미나이 API 키 (저장됨 · 바꾸려면 새 키 넣기)' : '제미나이 API 키 붙여 넣기'} aria-label="제미나이 API 키" />
             <button className="primary" disabled={busy || key.trim().length < 20} onClick={() => saveKey(key)}>키 저장</button>
             {st.gemini?.loggedIn && <button className="link small" disabled={busy} onClick={() => { if (window.confirm('제미나이 API 키를 지울까요? PraiseFlow에서도 지워집니다.')) saveKey(''); }}>키 지우기</button>}
-          </div>
+          </div>}
           <p className="muted small">키는 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 받을 수 있습니다(무료 사용량 안에서는 요금 없음). 무료 사용량으로 보낸 글은 구글이 서비스 개선에 쓸 수 있으니, 성도 개인 이야기가 많은 회의록은 구독 방식을 권합니다. 성도 명부·재정 자료는 어느 AI로도 보내지 않습니다.</p>
         </>
       )}

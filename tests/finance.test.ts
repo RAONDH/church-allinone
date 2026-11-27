@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore 서버 모듈은 JS
 import { importLedger, emptyFinance, cleanTx, financeCsv, matchMember } from '../server/finance.mjs';
-import { balances, donors, donorMonths, monthly, parseWon, totals } from '../src/lib/finance';
+import { balances, budgetKey, budgetOf, donors, donorMonths, monthly, parseWon, totals } from '../src/lib/finance';
 import type { Member, Tx } from '../src/lib/types';
 
 const M = (id: string, name: string): Member => ({ id, name, gender: '', birth: '', lunar: false, phone: '', address: '주소' + id, role: '', group: '', baptism: '', registeredAt: '', status: 'active', familyId: '', relation: '', memo: '', createdAt: 0, updatedAt: 0 });
@@ -14,6 +14,25 @@ describe('재정', () => {
     expect(parseWon('3만5천')).toBe(35000);
     expect(parseWon('1억2천만')).toBe(120000000);
     expect(parseWon('abc')).toBe(0);
+  });
+  it('금액: 소수점(3.5만)·원정·₩도 알아듣고, 못 읽는 글은 0', () => {
+    expect(parseWon('3.5만')).toBe(35000);
+    expect(parseWon('3만원정')).toBe(30000);
+    expect(parseWon('₩ 12,500')).toBe(12500);
+    expect(parseWon('1.25억')).toBe(125000000);
+    expect(parseWon('삼만')).toBe(0);
+  });
+  it('이달 합계: 이월금은 수입에 넣지 않고 따로 (보고서 월별 수입과 같은 숫자)', () => {
+    const tx = [T({ category: '일반이월금', date: '2026-01-01', amount: 5000000 }), T({ date: '2026-01-04', amount: 50000 }), T({ type: 'expense', category: '교제비', date: '2026-01-05', amount: 20000 })];
+    expect(totals(tx, '2026-01-01', '2026-01-31')).toMatchObject({ income: 50000, carry: 5000000, expense: 20000, net: 30000 });
+    expect(totals(tx, '2026-01-01', '2026-01-31').income).toBe(monthly(tx, '2026')[0].income);
+  });
+  it('예산: 이름이 같은 항목도 수입/지출·재정마다 따로, 예전(이름만) 예산도 읽는다', () => {
+    const b = { [budgetKey('income', '일반재정', '기타')]: 100, [budgetKey('expense', '일반재정', '기타')]: 200, 선교: 300 };
+    expect(budgetOf(b, 'income', '일반재정', '기타')).toBe(100);
+    expect(budgetOf(b, 'expense', '일반재정', '기타')).toBe(200);
+    expect(budgetOf(b, 'expense', '특별재정', '선교')).toBe(300);   // 예전 방식
+    expect(budgetOf({ ...b, [budgetKey('expense', '특별재정', '선교')]: 0 }, 'expense', '특별재정', '선교')).toBe(0);   // 새 칸이 있으면 그것
   });
   it('잔액·기간 합계', () => {
     const tx = [T({ category: '일반이월금', date: '2026-01-01', amount: 100 }), T({ amount: 50 }), T({ type: 'expense', category: '교제비', amount: 30 }), T({ fund: '특별재정', amount: 7, date: '2026-04-01' })];

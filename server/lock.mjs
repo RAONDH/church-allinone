@@ -17,6 +17,8 @@ export function areaOf(sub) {
   if (/^\/(people|members|visits|attendance)(\/|\.|$)/.test(sub)) return 'people';
   if (/^\/finance(\/|$)/.test(sub)) return 'finance';
   if (/^\/(admin|events|minutes|certs|serve|meeting-types|gcals)(\/|\.|$)/.test(sub)) return 'admin';
+  // 녹취 준비 상태 보기(/stt)는 잠그지 않고, 녹취 엔진·모델 받기(/stt/...)는 회의록과 같은 행정 구역 (잠긴 채로 수백 MB 받기를 시작하지 못하게)
+  if (/^\/stt\//.test(sub)) return 'admin';
   return '';
 }
 const hashPin = (pin, salt) => crypto.scryptSync(String(pin), Buffer.from(salt, 'hex'), 32).toString('hex');

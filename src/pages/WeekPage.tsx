@@ -92,6 +92,10 @@ export default function WeekPage() {
     if (save.state === 'dirty') { const t = setTimeout(doSave, 700); return () => clearTimeout(t); }
     if (save.state === 'error') { const t = setTimeout(doSave, 5000); return () => clearTimeout(t); }
   }, [save.state, week, doSave]);
+  // 화면을 떠날 때 아직 보내지 않은 입력이 있으면 바로 저장한다 (0.7초 기다리는 사이에 다른 화면으로 가도 저장되게)
+  const leaveRef = useRef({ state: save.state, doSave });
+  leaveRef.current = { state: save.state, doSave };
+  useEffect(() => () => { const { state, doSave: f } = leaveRef.current; if (state === 'dirty' || state === 'error') f(); }, []);
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => { if (save.state !== 'saved') { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', h);
@@ -185,7 +189,8 @@ function InfoTab({ week, status, update, replaceWeek, loadStatus }: { week: Week
   };
   const remove = async () => {
     if (!confirm(`${fmtDate(week.date)} ${week.name} 기록을 지울까요?\n예배송출의 예배 순서는 지우지 않고 그대로 둡니다.`)) return;
-    await api(`${base}/weeks/${week.id}`, { method: 'DELETE' });
+    try { await api(`${base}/weeks/${week.id}`, { method: 'DELETE' }); }
+    catch (e: any) { setMsg(`지우지 못했습니다: ${e.message}`); return; }
     await reload(); nav('/');
   };
   const linkedSvc = ov?.wc.services?.find((s) => s.id === week.wc?.serviceId);

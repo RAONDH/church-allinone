@@ -2,9 +2,10 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
+import { clickable } from '../lib/a11y';
 import { api } from '../lib/api';
 import type { Finance as FinanceData, FinanceSettings, Fund, Member, Tx } from '../lib/types';
-import { balances, byCategory, donorMonths, donors, FUNDS, monthly, parseWon, totals, won, type Donor } from '../lib/finance';
+import { balances, budgetKey, budgetOf, byCategory, donorMonths, donors, FUNDS, monthly, parseWon, totals, won, type Donor } from '../lib/finance';
 import { lastSunday } from '../lib/people';
 import { fmtDate, ymd } from '../lib/week';
 
@@ -100,6 +101,7 @@ function Ledger({ data, members, reload }: { data: FinanceData; members: Member[
           <div><span className="muted small">이달 수입</span><b className="ok-text">{won(sum.income)}</b></div>
           <div><span className="muted small">이달 지출</span><b className="warn-text">{won(sum.expense)}</b></div>
           <div><span className="muted small">이달 차액</span><b>{won(sum.net)}</b></div>
+          {sum.carry > 0 && <div><span className="muted small">이월금 (수입에 넣지 않음)</span><b>{won(sum.carry)}</b></div>}
           {FUNDS.map((f) => <div key={f}><span className="muted small">{f} 잔액 (월말)</span><b>{won(bal[f])}</b></div>)}
         </div>
       </div>
@@ -121,7 +123,7 @@ function Ledger({ data, members, reload }: { data: FinanceData; members: Member[
                   return (
                     <Fragment key={d}>
                       {xs.map((t, i) => (
-                        <tr key={t.id} onClick={() => setEdit(t)}>
+                        <tr key={t.id} {...clickable(() => setEdit(t))} aria-label={`${fmtDate(t.date)} ${t.category} ${won(t.amount)} 고치기`}>
                           <td className="muted">{i === 0 ? fmtDate(d) : ''}</td>
                           <td>{t.fund.replace('재정', '')}</td>
                           <td>{t.category}</td>
@@ -131,7 +133,7 @@ function Ledger({ data, members, reload }: { data: FinanceData; members: Member[
                           <td className="muted small">{t.note}</td>
                         </tr>
                       ))}
-                      <tr className="day-sum"><td /><td colSpan={3} className="muted small">{fmtDate(d)} 합계</td><td className="num">{won(totals(xs, d, d).income)}</td><td className="num">{won(totals(xs, d, d).expense)}</td><td /></tr>
+                      <tr className="day-sum"><td /><td colSpan={3} className="muted small">{fmtDate(d)} 합계</td><td className="num">{won(totals(xs, d, d).income + totals(xs, d, d).carry)}</td><td className="num">{won(totals(xs, d, d).expense)}</td><td /></tr>
                     </Fragment>
                   );
                 })}
@@ -159,7 +161,17 @@ async function askCategory(base: string, type: 'income' | 'expense', fund: Fund,
 function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Member[]; onSaved: () => Promise<void> }) {
   const { base } = useApp();
   const first = (): Row => ({ date: lastSunday(ymd(new Date())), type: 'income', fund: '일반재정', category: cats(data.settings, 'income', '일반재정')[0] || '', name: '', amount: '', note: '' });
-  const [rows, setRows] = useState<Row[]>([first()]);
+  // 적던 줄은 이 컴퓨터에 잠시 보관한다: 입력 창을 닫거나 다른 탭에 다녀와도, 실수로 창을 닫아도 다시 나온다
+  const draftKey = `fin-entry-draft:${base}`;
+  const used = (r: Row) => !!(r.name.trim() || r.amount.trim() || r.note.trim());
+  const [rows, setRows] = useState<Row[]>(() => {
+    try { const d = JSON.parse(localStorage.getItem(draftKey) || 'null'); if (Array.isArray(d) && d.some(used)) return d; } catch { /* 없음 */ }
+    return [first()];
+  });
+  const [restored] = useState(() => rows.some(used));
+  useEffect(() => {
+    try { if (rows.some(used)) localStorage.setItem(draftKey, JSON.stringify(rows)); else localStorage.removeItem(draftKey); } catch { /* 저장 못 해도 입력은 계속 */ }
+  }, [rows, draftKey]);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const set = (i: number, patch: Partial<Row>) => setRows(rows.map((r, j) => {
@@ -171,15 +183,19 @@ function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Mem
   const newCategory = (type: Row['type'], fund: Fund) => askCategory(base, type, fund, onSaved);
   const addRow = () => { const p = rows[rows.length - 1]; setRows([...rows, { ...p, name: '', amount: '', note: '' }]); setTimeout(() => { const els = document.querySelectorAll<HTMLInputElement>('.entry-name'); els[els.length - 1]?.focus(); }, 0); };
   const filled = rows.filter((r) => parseWon(r.amount) > 0);
+  // 금액을 읽지 못한 줄 (이름이나 금액을 적었는데 금액이 0): 장부에 넣지 않고 그대로 남겨 고치게 한다
+  const unread = (r: Row) => used(r) && parseWon(r.amount) <= 0;
+  const bad = rows.filter(unread);
   const total = filled.reduce((s, r) => s + (r.type === 'income' ? 1 : -1) * parseWon(r.amount), 0);
   const save = async () => {
     setBusy(true); setMsg('');
     try {
       const r = await api<{ added: Tx[] }>(`${base}/finance/tx`, { method: 'POST', body: { rows: filled.map((x) => ({ ...x, amount: parseWon(x.amount) })) } });
       await onSaved();
-      setMsg(`${r.added.length}건을 장부에 넣었습니다.`);
       const p = rows[rows.length - 1];
-      setRows([{ ...p, name: '', amount: '', note: '' }]);
+      // 금액을 읽지 못한 줄은 지우지 않고 남긴다 (예전에는 함께 지워져 헌금 기록이 사라졌다)
+      setRows(bad.length ? bad : [{ ...p, name: '', amount: '', note: '' }]);
+      setMsg(`${r.added.length}건을 장부에 넣었습니다.${bad.length ? ` 금액을 읽지 못한 ${bad.length}줄은 넣지 않고 남겨 두었습니다. 금액을 고친 뒤 다시 넣어 주세요.` : ''}`);
     } catch (e: any) { setMsg(e.message); }
     setBusy(false);
   };
@@ -199,7 +215,7 @@ function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Mem
                 <td><select value={r.fund} onChange={(e) => set(i, { fund: e.target.value as Fund })}>{FUNDS.map((f) => <option key={f}>{f}</option>)}</select></td>
                 <td><select value={r.category} onChange={async (e) => { if (e.target.value === NEW_CAT) { const n = await newCategory(r.type, r.fund); if (n) set(i, { category: n }); } else set(i, { category: e.target.value }); }}>{cats(data.settings, r.type, r.fund).map((c) => <option key={c}>{c}</option>)}<option value={NEW_CAT}>+ 새 항목 만들기…</option></select></td>
                 <td><input className="entry-name" list={r.type === 'income' ? 'member-names' : undefined} value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder={r.type === 'income' ? '헌금자 (무명 가능)' : '거래처'} /></td>
-                <td><input className="num" inputMode="numeric" value={r.amount} onChange={(e) => set(i, { amount: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addRow(); } }} placeholder="0" />{r.amount && parseWon(r.amount) > 0 && !/^\d+$/.test(r.amount.replace(/[,\s]/g, '')) && <small className="muted">{won(parseWon(r.amount))}</small>}</td>
+                <td><input className={`num ${unread(r) ? 'bad-input' : ''}`} aria-invalid={unread(r) || undefined} inputMode="numeric" value={r.amount} onChange={(e) => set(i, { amount: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addRow(); } }} placeholder="0" />{r.amount && parseWon(r.amount) > 0 && !/^\d+$/.test(r.amount.replace(/[,\s]/g, '')) && <small className="muted">{won(parseWon(r.amount))}</small>}{unread(r) && <small className="warn-text entry-bad">금액을 읽지 못함</small>}</td>
                 <td><input value={r.note} onChange={(e) => set(i, { note: e.target.value })} /></td>
                 <td><button className="icon" aria-label="줄 빼기" disabled={rows.length === 1} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button></td>
               </tr>
@@ -210,8 +226,9 @@ function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Mem
       <div className="row between">
         <button onClick={addRow}>줄 추가</button>
         <div className="row">
-          {msg && <span className={/넣었습니다/.test(msg) ? 'ok-text' : 'warn-text'}>{msg}</span>}
-          <span className="muted">{filled.length}건 · {won(total)}</span>
+          {msg && <span className={/넣었습니다/.test(msg) && !bad.length ? 'ok-text' : 'warn-text'}>{msg}</span>}
+          {!msg && restored && <span className="muted small">지난번에 적던 줄을 다시 불러왔습니다.</span>}
+          <span className="muted">{filled.length}건 · {won(total)}{bad.length ? <span className="warn-text"> · 금액을 읽지 못한 줄 {bad.length}</span> : null}</span>
           <button className="primary" disabled={busy || !filled.length} onClick={save}>{busy ? '저장 중…' : '장부에 넣기'}</button>
         </div>
       </div>
@@ -268,16 +285,24 @@ function Report({ data, year, reload }: { data: FinanceData; year: string; reloa
   const budget = data.budgets[year] || {};
   const end = balances(data.tx, `${year}-12-31`);
   const months = monthly(data.tx, year);
-  const startEdit = () => { setDraft(Object.fromEntries(Object.entries(budget).map(([k, v]) => [k, String(v)]))); setEditing(true); setMsg(''); };
+  const allNames = (type: 'income' | 'expense', fund: Fund) => [...new Set([...cats(data.settings, type, fund), ...Object.keys(by[type][fund] || {})])];
+  // 고칠 때는 수입/지출·재정·항목마다 따로 (예전 이름만 쓴 예산은 그 값을 각 칸에 옮겨 둔다)
+  const startEdit = () => {
+    const d: Record<string, string> = {};
+    for (const type of ['income', 'expense'] as const) for (const fund of FUNDS) for (const c of allNames(type, fund)) { const v = budgetOf(budget, type, fund, c); if (v) d[budgetKey(type, fund, c)] = String(v); }
+    setDraft(d); setEditing(true); setMsg('');
+  };
   const saveBudget = async () => {
     try {
-      await api(`${base}/finance/budgets/${year}`, { method: 'PUT', body: { budgets: Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, parseWon(v)])) } });
+      // 화면에 없는 항목의 옛 예산(이름만 쓴 것)은 그대로 남긴다
+      const shown = new Set((['income', 'expense'] as const).flatMap((type) => FUNDS.flatMap((fund) => allNames(type, fund))));
+      const keep = Object.fromEntries(Object.entries(budget).filter(([k]) => !k.includes('/') && !shown.has(k)));
+      await api(`${base}/finance/budgets/${year}`, { method: 'PUT', body: { budgets: { ...keep, ...Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, parseWon(v)])) } } });
       await reload(); setEditing(false); setMsg('예산을 저장했습니다.');
     } catch (e: any) { setMsg(e.message); }
   };
   const rowsFor = (type: 'income' | 'expense', fund: Fund) => {
-    const names = [...new Set([...cats(data.settings, type, fund), ...Object.keys(by[type][fund] || {})])];
-    return names.map((c) => ({ c, actual: by[type][fund]?.[c] || 0, plan: budget[c] || 0 })).filter((x) => x.actual || x.plan || editing);
+    return allNames(type, fund).map((c) => ({ c, k: budgetKey(type, fund, c), actual: by[type][fund]?.[c] || 0, plan: budgetOf(budget, type, fund, c) })).filter((x) => x.actual || x.plan || editing);
   };
   const table = (type: 'income' | 'expense') => {
     let tp = 0, ta = 0;
@@ -296,7 +321,7 @@ function Report({ data, year, reload }: { data: FinanceData; year: string; reloa
                 {rows.map((r) => (
                   <tr key={r.c}>
                     <td>{r.c}</td>
-                    <td className="num">{editing ? <input className="num budget-input" inputMode="numeric" value={draft[r.c] ?? ''} onChange={(e) => setDraft({ ...draft, [r.c]: e.target.value })} /> : r.plan ? won(r.plan) : ''}</td>
+                    <td className="num">{editing ? <input className="num budget-input" inputMode="numeric" value={draft[r.k] ?? ''} onChange={(e) => setDraft({ ...draft, [r.k]: e.target.value })} aria-label={`${fund} ${r.c} 예산`} /> : r.plan ? won(r.plan) : ''}</td>
                     <td className="num">{won(r.actual)}</td>
                     <td className="num muted">{r.plan ? `${Math.round((r.actual / r.plan) * 100)}%` : ''}</td>
                   </tr>

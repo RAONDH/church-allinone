@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,7 +9,9 @@ import { sampleWcSeed } from '../server/sample.mjs';
 import { prepSteps, splitWeeks, nextStep, setlistText } from '../src/lib/week';
 import type { Week } from '../src/lib/types';
 
-const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'hub-')), 'wc.json');
+const tmpDirs: string[] = [];
+const tmp = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-')); tmpDirs.push(d); return path.join(d, 'wc.json'); };
+afterAll(() => { for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true }); });
 const week = (p: Partial<Week> = {}): Week => ({ id: 'w', date: '2026-11-15', name: '주일 예배', passage: '', sermonTitle: '', announcements: [], sermonNotes: '', sermonVideoUrl: '', prayerLeader: '', wc: null, final: null, copiedFrom: null, createdAt: 0, updatedAt: 0, ...p });
 
 describe('이번 주 계산', () => {

@@ -85,6 +85,25 @@ describe('백업', () => {
     expect(JSON.parse(fs.readFileSync(path.join(d, 'backups', r.kept), 'utf8')).church.name).toBe('바뀐교회');
     expect(fs.existsSync(path.join(d, 'recordings', 'real', 'm1.wav'))).toBe(true);
   });
+  it('녹음이 많으면 백업을 여러 부로 나눠 받고 (한 파일이 되살리기 한도를 넘지 않게), 1부부터 차례로 되살리면 녹음이 모두 돌아온다', async () => {
+    const d = T();
+    const s = openStore(d, 'real'); s.db.church = { name: '원래교회' }; s.db.weeks = {}; await s.save();
+    const rec = path.join(d, 'recordings', 'real'); fs.mkdirSync(rec, { recursive: true });
+    for (const n of ['a', 'b', 'c']) fs.writeFileSync(path.join(rec, `${n}.wav`), Buffer.alloc(4000, 1));
+    const b = makeBackups({ dataDir: d, store: s, partBytes: 6000 });   // 시험용 한도: 녹음 한 개 + 자료
+    expect(b.view().parts.map((x: any) => x.files)).toEqual([2, 1, 1]);
+    const get = async (part: number) => { const out = new PassThrough(), bufs: Buffer[] = []; out.on('data', (c) => bufs.push(c)); (out as any).writeHead = () => {}; await b.download(out, part); return Buffer.concat(bufs); };
+    const zips = [await get(0), await get(1), await get(2)];
+    expect(zips.every((z) => z.length < 6000 + 1000)).toBe(true);
+    for (const n of ['a', 'b', 'c']) fs.rmSync(path.join(rec, `${n}.wav`));
+    s.db.church = { name: '바뀐교회' }; await s.save();
+    expect((await b.restoreUpload(zips[0], '1부.zip')).church).toBe('원래교회');
+    const r2 = await b.restoreUpload(zips[1], '2부.zip');
+    expect([r2.recordingsOnly, r2.recordings]).toEqual([true, 1]);
+    await b.restoreUpload(zips[2], '3부.zip');
+    expect(fs.readdirSync(rec).sort()).toEqual(['a.wav', 'b.wav', 'c.wav']);
+    expect(s.db.church.name).toBe('원래교회');   // 녹음 묶음은 교회 자료를 건드리지 않음
+  });
   it('되살리기: 올인원 자료가 아닌 파일, 작업 중일 때는 거절', async () => {
     const d = T();
     const s = openStore(d, 'real'); await s.save();

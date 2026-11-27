@@ -19,6 +19,12 @@ export async function runApi() {
     { id: 'gone', name: '없는 프로그램', desc: '시험', icon: '🧪', color: '#000', port: 1, dir: path.join(appDir, 'nope'), start: 'true', win: { dir: path.join(appDir, 'nope'), run: ['node', '-e', '0'] } },
   ]));
   const ms = await fakeMusicSheet();
+  // 가짜 PraiseFlow(찬양 큐레이터): 상태와 추천. 받은 요청을 적어 둔다
+  const pfCalls = [];
+  const pf = await fakeServer({
+    '/api/status': json({ ready: true, providerLabel: '시험 키' }),
+    '/api/analyze': (q, r) => { let b = ''; q.on('data', (c) => (b += c)); q.on('end', () => { pfCalls.push(JSON.parse(b || '{}')); r.setHeader('Content-Type', 'application/json'); r.end(JSON.stringify({ theme: '시험 주제', keyMessage: '시험 메시지', recommendations: [{ title: '시험 찬양', artist: '시험', type: 'CCM', reason: '시험 이유', youtubeUrl: 'https://example.invalid/y', sheetMusicUrl: 'javascript:alert(1)' }] })); }); },
+  });
   // 가짜 제미나이 API: 받은 요청을 적어 두고, mode 가 '429' 면 사용 한도 오류를 돌려준다
   const gem = { mode: 'ok', calls: [] };
   const gemini = await fakeServer({ '*': (q, r) => {
@@ -33,7 +39,7 @@ export async function runApi() {
       r.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: `# 주보용 설교 요약\n\n${'제미나이가 쓴 시험 요약 문장입니다. '.repeat(20)}` }] }, finishReason: 'STOP' }] }));
     });
   } });
-  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base, GEMINI_API_BASE: gemini.base } });
+  const hub = await startHub({ name: 'api', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, HUB_APPS_FILE: appsFile, MUSICSHEET_ORIGIN: ms.base, GEMINI_API_BASE: gemini.base, PRAISEFLOW_URL: pf.base } });
   const { get, post, put, del } = hub;
   const ctx = {};
   // AI 키 바꾸기: 앞의 점검에서 켠 잠금이 남아 있으므로, 잠금을 푼 쪽지(주인)로 바꾼다
@@ -81,6 +87,14 @@ export async function runApi() {
         ok(r.sync.skipped || r.sync.ok === false, '예배송출과 연결되지 않은 예배는 동기화를 건너뜀', r.sync);
         const w = (await get(`${R}/weeks/${ctx.week}`)).data.week;
         eq([w.passage, w.sermonTitle, w.announcements, w.sermonNotes], ['시편 23:1-6', '목자', ['광고 하나'], '짧은 원고'], '다시 읽은 예배 정보');
+      }],
+      ['예배 정보: 긴 한글 원고(수십만 바이트)를 보내도 글자가 깨지지 않고 그대로 저장된다', async () => {
+        // 서버가 받는 조각의 경계가 한글(3바이트) 가운데에 걸리게 길게 보낸다
+        const long = '하나님은 사랑이시라 다윗의 시 여호와는 나의 목자시니 내게 부족함이 없으리로다. '.repeat(1800).slice(0, 90000) + '끝';
+        expectStatus(await put(`${R}/weeks/${ctx.week}`, { sermonNotes: long }), 200, '긴 원고 저장');
+        const got = (await get(`${R}/weeks/${ctx.week}`)).data.week.sermonNotes;
+        eq([got.length, got.includes('\uFFFD'), got === long], [long.length, false, true], '다시 읽은 원고 (길이·깨진 글자·같은지)');
+        expectStatus(await put(`${R}/weeks/${ctx.week}`, { sermonNotes: '짧은 원고' }), 200, '원래대로');
       }],
       ['두 창 충돌: 고친 칸만 저장해 다른 칸을 되돌리지 않고, 같은 칸을 다른 창이 먼저 바꿨으면 덮어쓰지 않고 알려 준다', async () => {
         const W = `${R}/weeks/${ctx.week}`;
@@ -331,6 +345,18 @@ export async function runApi() {
         eq([!!m.recording, m.audio?.name.endsWith('녹음.wav')], [false, true], '녹음 중 표시·녹음 파일');
         expectStatus(await post(`${R}/minutes/${ctx.recM}/rec/finish`, {}), 400, '저장된 조각이 없으면 마무리 거절');
       }],
+      ['녹음 파일 일부 받기: 범위를 나눠 받을 수 있고, 맞지 않는 범위는 거절할 뿐 서버가 꺼지지 않는다', async () => {
+        const A = `${hub.base}${R}/minutes/${ctx.recM}/audio`, size = 5 * 32000 + 44;
+        const part = await fetch(A, { headers: { Range: 'bytes=0-11' } });
+        eq([part.status, (await part.arrayBuffer()).byteLength], [206, 12], '앞 12바이트');
+        const tail = await fetch(A, { headers: { Range: 'bytes=-4' } });
+        eq([tail.status, tail.headers.get('content-range')], [206, `bytes ${size - 4}-${size - 1}/${size}`], '끝 4바이트');
+        for (const bad of ['bytes=500-100', `bytes=${size + 10}-`]) {
+          const r = await fetch(A, { headers: { Range: bad } });
+          eq(r.status, 416, `맞지 않는 범위 ${bad}`); await r.arrayBuffer();
+        }
+        expectStatus(await get('/api/health'), 200, '그 뒤에도 서버가 살아 있음');
+      }],
       ['회의록 지우기: 녹음하던 조각 파일도 함께 지운다', async () => {
         const m = (await post(`${R}/minutes`, { date: today, meeting: '당회', title: '지울 녹음' })).data.item;
         await hub.postRaw(`${R}/minutes/${m.id}/rec?seq=0`, Buffer.alloc(32000, 1));
@@ -449,6 +475,44 @@ export async function runApi() {
       ['프로그램 목록: 설치·켜짐 상태를 보여 준다 (가짜 프로그램)', async () => {
         const apps = (await get('/api/apps')).data;
         eq(apps.map((a) => [a.id, a.installed, a.running]), [['fake', true, true], ['gone', false, false]], '프로그램 상태');
+      }],
+      ['프로그램 켜기: 켜져 있는 프로그램은 주소를 돌려주고, 없는 프로그램·모르는 이름은 거절할 뿐 서버는 살아 있다', async () => {
+        const r = expectStatus(await post('/api/apps/fake/start'), 200, '켜져 있는 가짜 프로그램');
+        eq([r.ok, r.url], [true, `http://localhost:${fakeApp.port}/`], '돌려준 주소');
+        ok((await post('/api/apps/gone/start')).status >= 400, '폴더가 없는 프로그램은 거절');
+        expectStatus(await post('/api/apps/nope/start'), 404, '모르는 프로그램');
+        expectStatus(await get('/api/health'), 200, '그 뒤에도 서버가 살아 있음');
+      }],
+      ['예배송출 연결(예제): 예배를 주일 순서로 연결하면 순서가 생기고, 지금 예배로 열 수 있으며, 연결을 끊으면 열 수 없다', async () => {
+        const w = expectStatus(await post(`${S}/weeks`, { date: '2031-03-02', name: '연결 시험 예배', wcMode: 'none' }), 200, '연결 안 한 예배 만들기').week;
+        try {
+          eq(w.wc, null, '처음에는 연결 없음');
+          expectStatus(await post(`${S}/weeks/${w.id}/open-caster`), 400, '연결 전 지금 예배로 열기');
+          const l = expectStatus(await post(`${S}/weeks/${w.id}/link`, {}), 200, '주일 순서로 연결');
+          ok(l.week.wc?.serviceId, '연결한 예배송출 순서 번호', l.week.wc);
+          const o = expectStatus(await post(`${S}/weeks/${w.id}/open-caster`), 200, '지금 예배로 열기');
+          eq([o.ok, o.url], [true, null], '예제(가상 예배송출)는 열 주소 없음');
+          // 다른 순서로 다시 연결: 없는 순서 번호는 알려 준다
+          const bad = expectStatus(await post(`${S}/weeks/${w.id}/link`, { serviceId: 'nope' }), 200, '없는 순서로 연결');
+          ok(bad.sync?.ok === false && /찾을 수 없습니다/.test(bad.sync.error || ''), '없는 순서는 실패로 알림', bad.sync);
+          expectStatus(await post(`${S}/weeks/${w.id}/link`, { serviceId: l.week.wc.serviceId }), 200, '있는 순서로 다시 연결');
+          eq(expectStatus(await post(`${S}/weeks/${w.id}/unlink`), 200, '연결 끊기').week.wc, null, '끊은 뒤 연결 없음');
+          expectStatus(await post(`${S}/weeks/${w.id}/open-caster`), 400, '끊은 뒤 지금 예배로 열기');
+        } finally { await del(`${S}/weeks/${w.id}`); }
+      }],
+      ['찬양 추천: 예제는 정해진 예시, 우리 교회는 PraiseFlow 에 본문·제목을 보내 받은 추천을 예배 기록에 보관한다 (이상한 링크는 버림)', async () => {
+        expectStatus(await post(`${S}/weeks/${ctx.sw}/recommend`, { hymnCount: 0, ccmCount: 0 }), 400, '곡 수 없이 추천');
+        const s = expectStatus(await post(`${S}/weeks/${ctx.sw}/recommend`, { hymnCount: 0, ccmCount: 3 }), 200, '예제 추천');
+        ok(s.ok && s.recs.sample && s.recs.items.length === 3, '예제 추천 3곡', s.recs);
+        eq(pfCalls.length, 0, '예제는 PraiseFlow 에 묻지 않음');
+        const pfs = (await get(`${R}/praiseflow`)).data;
+        eq([pfs.running, pfs.ready], [true, true], 'PraiseFlow 상태 (가짜)');
+        await put(`${R}/weeks/${ctx.week}`, { passage: '시편 23:1-6', sermonTitle: '목자' });
+        const r = expectStatus(await post(`${R}/weeks/${ctx.week}/recommend`, { hymnCount: 1, ccmCount: 2 }), 200, '우리 교회 추천');
+        ok(r.ok, '추천 성공', r);
+        eq([pfCalls.at(-1).hymnCount, pfCalls.at(-1).ccmCount, /시편 23:1-6/.test(pfCalls.at(-1).text)], [1, 2, true], 'PraiseFlow 에 보낸 것');
+        eq([r.recs.theme, r.recs.items[0].title, r.recs.items[0].youtubeUrl, r.recs.items[0].sheetMusicUrl], ['시험 주제', '시험 찬양', 'https://example.invalid/y', ''], '받은 추천 (javascript: 링크는 버림)');
+        eq((await get(`${R}/weeks/${ctx.week}`)).data.week.recs?.items?.[0]?.title, '시험 찬양', '예배 기록에 보관');
       }],
       ['업데이트: 새 버전을 알리고, 받기 표 앞까지만 보여 주고, 미루면 하루 동안 조용 (가짜 GitHub)', async () => {
         const v = (await get('/api/update?force=1')).data;
@@ -900,6 +964,8 @@ export async function runApi() {
           ok(fs.readdirSync(h2.dataDir).some((f) => f.startsWith('real.json.broken-')), '깨진 파일 보관본', fs.readdirSync(h2.dataDir));
           ok(!fs.existsSync(path.join(ext, '라온교회올인원-백업', `real-${today}.json`)), '켤 때 깨진 파일을 바깥 백업으로 복사하지 않음');
           ok((await h2.get(S)).data.church?.name, '예제 자료는 깨져도 다시 만들어 그대로 씀', (await h2.get(S)).data.church);
+          // 깨진 동안에는 잠금 설정을 읽을 수 없으므로 AI 키도 바꾸지 못한다 (잠금을 건너뛰지 않게)
+          eq((await h2.put('/api/ai/gemini-key', { key: 'AIzaSy-broken_KEY.0123456789abcdefghijk' })).status, 409, '깨진 동안 AI 키 바꾸기 거절');
 
           const rec = expectStatus(await h2.get('/api/recovery'), 200, '복구 후보 보기');
           const find = (src, f) => rec.list.find((c) => c.source === src && c.file === f);
@@ -923,7 +989,7 @@ export async function runApi() {
       }],
     ]);
   } finally {
-    await hub.stop(); await gh.close(); await fakeApp.close(); await ms.close(); await gemini.close();
+    await hub.stop(); await gh.close(); await fakeApp.close(); await ms.close(); await gemini.close(); await pf.close();
     fs.rmSync(appDir, { recursive: true, force: true });
   }
 }

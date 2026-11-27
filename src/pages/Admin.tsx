@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
+import { clickable } from '../lib/a11y';
 import { api } from '../lib/api';
 import type { Admin as AdminData, Cert, ChurchEvent, GcalCal, Member, Visit } from '../lib/types';
 import { eventsOn, monthGrid, upcomingEvents } from '../lib/admin';
@@ -88,7 +89,7 @@ function Calendar({ data, members, visits, reload }: { data: AdminData; members:
           {weeks.flat().map((d) => {
             const evs = eventsOn([...data.events, ...gev], d);
             return (
-              <div key={d} className={`cal-day ${d.slice(0, 7) !== month ? 'other' : ''} ${d === today ? 'today' : ''}`} onClick={() => setEdit({ date: d })}>
+              <div key={d} className={`cal-day ${d.slice(0, 7) !== month ? 'other' : ''} ${d === today ? 'today' : ''}`} {...clickable(() => setEdit({ date: d }))} title="눌러서 일정 추가">
                 <div className={`cal-num ${new Date(d + 'T00:00:00').getDay() === 0 ? 'sun' : ''}`}>{+d.slice(8)}</div>
                 {evs.map((e) => <button key={e.id} style={e.kind === '구글' ? { background: `${calOf((e as any).cal)?.color || '#1a73e8'}1f`, color: calOf((e as any).cal)?.color || '#1a73e8' } : undefined} className={`cal-ev k-${KINDS.indexOf(e.kind)} ${e.kind === '구글' ? 'g' : ''}`} onClick={(x) => { x.stopPropagation(); if (e.kind === '구글') setGview(e); else setEdit(e); }} title={e.title}>{e.time && <small>{e.time} </small>}{e.title}</button>)}
                 {visitsOn(d).map((v) => <button key={v.id} className="cal-ev care" onClick={(x) => { x.stopPropagation(); nav('/people/visits'); }}>🏠 {v.memberIds.map(name).join(', ')}</button>)}

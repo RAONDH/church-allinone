@@ -15,7 +15,7 @@ import { KINDS, MIN_NOTES, buildPrompt, extractResult, sampleResult } from './af
 import { peopleApi } from './people.mjs';
 import { financeApi } from './finance.mjs';
 import { adminApi, fetchGcal, minutesBusy } from './admin.mjs';
-import { makeUpdater } from './update.mjs';
+import { makeUpdater, pruneOldVersions } from './update.mjs';
 import { bootingFile } from './boot.mjs';
 import { makeBackups } from './backup.mjs';
 import { makeLock, areaOf } from './lock.mjs';
@@ -37,6 +37,8 @@ const LOG_DIR = process.env.HUB_LOG_DIR || path.join(os.homedir(), '.raon-worksp
 const APPS_FILE = process.env.HUB_APPS_FILE || path.join(ROOT, 'apps.json');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
+// 미처 잡지 못한 오류 하나로 프로그램 전체가 꺼지지 않게: 기록만 남기고 계속 돈다
+process.on('unhandledRejection', (e) => console.error('[오류] 처리하지 못한 오류(프로그램은 계속 켜져 있음):', e?.stack || e));
 if (!WIN) process.env.PATH = `${os.homedir()}/.local/node/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`;
 
 // ── 새 버전 알림·자동 설치 (server/update.mjs) ─────────────
@@ -86,9 +88,11 @@ setInterval(() => refreshGcal().catch(() => {}), 15 * 60 * 1000).unref();
 // ── 도움 함수 ─────────────────────────────────────
 class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 const send = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(obj)); };
-async function body(req, max = 5e6) {
-  let s = '';
-  for await (const c of req) { s += c; if (s.length > max) throw new HttpError(413, '보낸 자료가 너무 큽니다.'); }
+// 조각을 모았다가 한 번에 글자로 바꾼다 (조각 경계에 걸린 한글이 깨지지 않게). 크기는 바이트로 센다
+export async function body(req, max = 5e6) {
+  const chunks = []; let n = 0;
+  for await (const c of req) { n += c.length; if (n > max) throw new HttpError(413, '보낸 자료가 너무 큽니다.'); chunks.push(c); }
+  const s = Buffer.concat(chunks).toString('utf8');
   try { return s ? JSON.parse(s) : {}; } catch { throw new HttpError(400, '자료 형식이 올바르지 않습니다.'); }
 }
 const str = (v, n = 200) => String(v ?? '').slice(0, n);
@@ -182,6 +186,7 @@ async function ensureRunning(app) {
   child.unref();
   let exited = null;
   child.on('exit', (code) => { exited = code; });
+  child.on('error', (e) => { exited = -1; console.error(`[프로그램 켜기] ${app.name}:`, e.message); });   // 실행 파일이 없어도 서버가 꺼지지 않게
   // 처음 켤 때 부품을 받거나 화면을 만드는 프로그램이 있어 넉넉히 기다린다 (최대 3분)
   for (let i = 0; i < 360; i++) {
     if (await probe(app)) return;
@@ -228,7 +233,9 @@ async function api(req, res, url) {
   if (p === '/api/ai' && req.method === 'GET') return send(res, 200, await aiStatus(url.searchParams.has('refresh')));
   if (p === '/api/ai/gemini-key' && req.method === 'PUT') {
     // 잠금 중에는 키를 바꾸지 못하게 (몰래 다른 사람 키로 바꿔 회의록 정리 등 AI 요청을 그쪽으로 보내지 못하게)
-    if (!spaces.real.store.broken) await wrapB(() => lock.guardAny(spaces.real.store.db, req, 'AI 키를 바꾸려면'));
+    // 자료 파일이 깨져 있으면 잠금 설정을 확인할 수 없으므로 키도 바꾸지 않는다 (복구한 뒤에)
+    if (spaces.real.store.broken) throw new HttpError(409, '자료 파일을 먼저 복구한 뒤에 AI 키를 바꿀 수 있습니다.');
+    await wrapB(() => lock.guardAny(spaces.real.store.db, req, 'AI 키를 바꾸려면'));
     const b = await body(req); await wrapB(() => setGeminiKey(b.key)); return send(res, 200, await aiStatus(true));
   }
   // ── 백업 (실제 교회 자료만) ──
@@ -251,7 +258,7 @@ async function api(req, res, url) {
   if (p.startsWith('/api/backup/')) await wrapB(() => lock.guardAny(spaces.real.store.db, req));
   if (p === '/api/backup/settings' && req.method === 'PUT') { const b = await body(req); const r = await wrapB(() => backups.setDir(b.dir)); return send(res, 200, { ...backups.view(), result: r }); }
   if (p === '/api/backup/now' && req.method === 'POST') { const r = await backups.external(true); return send(res, 200, { ...backups.view(), result: r }); }
-  if (p === '/api/backup/download' && req.method === 'GET') { await backups.download(res); return; }
+  if (p === '/api/backup/download' && req.method === 'GET') { await backups.download(res, Number(url.searchParams.get('part') || 0)); return; }
   if (p === '/api/backup/restore-local' && req.method === 'POST') { const b = await body(req); return send(res, 200, await wrapB(() => backups.restoreLocal(b.file))); }
   if (p === '/api/backup/restore' && req.method === 'POST') {
     // 브라우저가 미리 확인(preflight)해야만 붙일 수 있는 머리글이 있어야 받는다 → 다른 곳에서 몰래 보내는 되살리기를 막음
@@ -275,7 +282,9 @@ async function api(req, res, url) {
       const exe = appExe(app);
       const target = exe || (app.installer && fs.existsSync(app.installer) ? app.installer : '');
       if (!target) throw new HttpError(400, `${app.name}이 설치되어 있지 않습니다.`);
-      spawn(target, [], { detached: true, stdio: 'ignore', windowsHide: false }).unref();
+      const child = spawn(target, [], { detached: true, stdio: 'ignore', windowsHide: false });
+      child.on('error', (e) => console.error(`[프로그램 켜기] ${app.name}을 켜지 못했습니다:`, e.message));   // 처리하지 않은 'error' 로 서버가 꺼지지 않게
+      child.unref();
       return send(res, 200, { ok: true, url: '', message: exe ? `${app.name} 창이 열립니다. 잠시 기다려 주세요.` : `${app.name} 설치 창을 열었습니다. 설치를 마친 뒤 다시 눌러 주세요.` });
     }
     await ensureRunning(app);
@@ -854,7 +863,7 @@ const DIST = path.join(ROOT, 'dist');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
 function serveStatic(res, url) {
   let file = path.normalize(path.join(DIST, decodeURIComponent(url.pathname)));
-  if (!file.startsWith(DIST) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
+  if (!file.startsWith(DIST + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
   if (!fs.existsSync(file)) { res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' }).end('화면이 아직 만들어지지 않았습니다. npm run build 를 먼저 실행하세요.'); return; }
   res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': file.endsWith('index.html') ? 'no-cache' : 'max-age=31536000' });
   fs.createReadStream(file).pipe(res);
@@ -873,6 +882,8 @@ const server = http.createServer(async (req, res) => {
     serveStatic(res, url);
   } catch (e) {
     if (!(e instanceof HttpError)) console.error(e);
+    // 응답을 이미 보내기 시작했으면 다시 머리글을 쓰지 않고 연결만 끊는다 (서버가 꺼지지 않게)
+    if (res.headersSent) { res.destroy(); return; }
     send(res, e instanceof HttpError ? e.code : 500, { error: e.message || '알 수 없는 오류' });
   }
 });
@@ -885,6 +896,7 @@ server.on('error', (e) => {
 server.on('listening', () => {
   delete process.env.HUB_WAIT_PORT;
   fs.rmSync(bootingFile(DATA_DIR), { force: true });   // 끝까지 켜졌다는 표시 (server/index.mjs)
+  try { pruneOldVersions(DATA_DIR, VERSION); } catch (e) { console.error('[업데이트] 옛 버전 정리 실패:', e.message); }
   console.log(`라온 교회 올인원 ${VERSION}: http://localhost:${PORT}  (예배송출 연결: ${spaces.real.wc().base})`);
 });
 server.listen(PORT, '127.0.0.1');

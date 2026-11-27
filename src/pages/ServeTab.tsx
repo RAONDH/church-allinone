@@ -31,7 +31,7 @@ export default function ServeTab({ data, members, reload }: { data: AdminData; m
 
   const put = async (dates: Serve['plan']) => {
     setErr('');
-    try { await api(`${base}/serve/plan`, { method: 'PUT', body: { dates } }); await reload(); } catch (e: any) { setErr(e.message); }
+    try { await api(`${base}/serve/plan`, { method: 'PUT', body: { dates } }); await reload(); return true; } catch (e: any) { setErr(e.message); return false; }
   };
   const fill = async () => {
     const active = new Set(members.filter(current).map((m) => m.id));
@@ -104,7 +104,7 @@ export default function ServeTab({ data, members, reload }: { data: AdminData; m
         <h2>{ov?.church?.name || ''} {month.slice(0, 4)}년 {+month.slice(5)}월 예배 봉사표</h2>
         <Table print />
       </div>
-      {cell && <CellDialog key={cell.date + cell.role.id} date={cell.date} role={cell.role} serve={serve} members={members} onClose={() => setCell(null)} onSave={async (xs) => { await put({ [cell.date]: { ...(serve.plan[cell.date] || {}), [cell.role.id]: xs } }); setCell(null); }} />}
+      {cell && <CellDialog key={cell.date + cell.role.id} date={cell.date} role={cell.role} serve={serve} members={members} onClose={() => setCell(null)} onSave={async (xs) => { if (await put({ [cell.date]: { ...(serve.plan[cell.date] || {}), [cell.role.id]: xs } })) setCell(null); else throw new Error('저장하지 못했습니다'); }} />}
       {rolesOpen && <RolesDialog serve={serve} members={members} onClose={() => setRolesOpen(false)} reload={reload} />}
     </div>
   );
@@ -112,10 +112,13 @@ export default function ServeTab({ data, members, reload }: { data: AdminData; m
 
 // 한 칸(날짜×봉사) 바꾸기: 맡는 분을 먼저, 그 밖의 성도와 명부에 없는 이름도
 function CellDialog({ date, role, serve, members, onClose, onSave }: { date: string; role: ServeRole; serve: Serve; members: Member[]; onClose: () => void; onSave: (xs: string[]) => Promise<void> }) {
-  const g = useGuardedClose(onClose);
   const init = serve.plan[date]?.[role.id] || [];
   const [pick, setPick] = useState<string[]>(init.filter((x) => members.some((m) => m.id === x)));
   const [text, setText] = useState(init.filter((x) => !members.some((m) => m.id === x)).join(', '));
+  const [saveErr, setSaveErr] = useState('');
+  // 이름 단추로만 바꿔도 '바뀜'으로 본다 (처음 칸과 지금 고른 것을 비교)
+  const g = useGuardedClose(onClose, () => JSON.stringify([...pick, ...text.split(/[,\n]/).map((x) => x.trim()).filter(Boolean)]) !== JSON.stringify(init));
+  const trySave = async (xs: string[]) => { setSaveErr(''); try { await onSave(xs); } catch { setSaveErr('저장하지 못했습니다. 고른 내용은 그대로 두었으니 다시 눌러 주세요.'); } };
   const [allOpen, setAllOpen] = useState(false);
   const busy = new Set(Object.entries(serve.plan[date] || {}).filter(([k]) => k !== role.id).flatMap(([, v]) => v));
   const pool = role.pool.map((id) => members.find((m) => m.id === id)).filter((m): m is Member => !!m && current(m));
@@ -133,8 +136,8 @@ function CellDialog({ date, role, serve, members, onClose, onSave }: { date: str
           : <button className="link small" onClick={() => setAllOpen(true)}>다른 성도도 보기</button>}
         <label>명부에 없는 분 (쉼표로 나눔)<input value={text} onChange={(e) => setText(e.target.value)} placeholder="예: 반주자 홍길동, 외부 강사" /></label>
         <div className="row between">
-          <button className="danger-link" onClick={() => onSave([])}>이 칸 비우기</button>
-          <div className="row"><button onClick={g.close}>닫기</button><button className="primary" onClick={() => onSave(result)}>저장</button></div>
+          <button className="danger-link" onClick={() => trySave([])}>이 칸 비우기</button>
+          <div className="row">{saveErr && <span className="warn-text small">{saveErr}</span>}<button onClick={g.close}>닫기</button><button className="primary" onClick={() => trySave(result)}>저장</button></div>
         </div>
       </div>
     </div>

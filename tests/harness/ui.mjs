@@ -37,10 +37,18 @@ export async function runUi() {
   const hub = await startHub({ name: 'ui', env: { UPDATE_LATEST_URL: `${gh.base}/latest`, MUSICSHEET_ORIGIN: ms.base } });
   const files = tmpDir('ui-files');
   const profile = tmpDir('ui-profile');   // 사용자의 크롬 프로필과 섞이지 않게
-  const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
-    '--autoplay-policy=no-user-gesture-required',
-    // 이 컴퓨터의 소리 장치 상태와 관계없이 소리 처리가 돌게 (시험용 가짜 오디오 출력)
-    '--disable-audio-output'] });
+  let browser;
+  try {
+    browser = await puppeteer.launch({ executablePath: chrome, headless: true, args: ['--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`,
+      '--autoplay-policy=no-user-gesture-required',
+      // 이 컴퓨터의 소리 장치 상태와 관계없이 소리 처리가 돌게 (시험용 가짜 오디오 출력)
+      '--disable-audio-output'] });
+  } catch (e) {
+    // 크롬이 켜지지 않아도 시험 서버·임시 폴더는 치운다
+    await hub.stop(); await gh.close(); await ms.close();
+    fs.rmSync(files, { recursive: true, force: true }); fs.rmSync(profile, { recursive: true, force: true });
+    return [{ name: '화면 점검: 크롬을 켜지 못함', ok: false, error: String(e?.message || e) }];
+  }
   const page = await browser.newPage();
   // 마이크 대신 크롬 안에서 만든 소리(발진음)를 넣는다. 맥의 실제 마이크·권한 창은 점검으로 확인할 수 없어 건너뜀
   await page.evaluateOnNewDocument(() => {
@@ -232,6 +240,31 @@ export async function runUi() {
         await waitText('화면시험헌금자');
         noErrors('재정');
       }],
+      ['재정(예제): 금액을 읽지 못한 줄은 넣지 않고 남겨 두고, 입력 창을 닫았다 열어도 적던 줄이 남는다', async () => {
+        await go('/finance?ws=sample');
+        await clickText('수입·지출 입력');
+        const name1 = await page.$('input.entry-name'), amt1 = await page.$('.entry-table input.num');
+        await name1.type('읽는금액성도'); await amt1.type('3.5만');
+        await amt1.press('Enter'); await sleep(100);   // 새 줄
+        const names = await page.$$('input.entry-name'), amts = await page.$$('.entry-table input.num');
+        await names[1].type('못읽는금액성도'); await amts[1].type('삼만원');
+        await waitText('금액을 읽지 못함');
+        await clickText('장부에 넣기');
+        await waitText('금액을 읽지 못한 1줄은 넣지 않고 남겨 두었습니다');
+        const left = await page.$$eval('input.entry-name', (xs) => xs.map((x) => x.value));
+        eq(left, ['못읽는금액성도'], '입력 칸에 남은 줄');
+        const tx = (await hub.get('/api/ws/sample/finance')).data.tx;
+        eq([tx.find((t) => t.name === '읽는금액성도')?.amount, tx.some((t) => t.name === '못읽는금액성도')], [35000, false], '장부에 들어간 것');
+        await clickText('입력 닫기'); await sleep(100);
+        await clickText('수입·지출 입력');
+        await waitText('지난번에 적던 줄을 다시 불러왔습니다');
+        eq(await page.$$eval('input.entry-name', (xs) => xs.map((x) => x.value)), ['못읽는금액성도'], '다시 연 입력 칸');
+        // 뒷정리: 보관한 줄과 넣은 기록
+        await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('fin-entry-draft:')) localStorage.setItem(k, '[]'); });
+        const t = (await hub.get('/api/ws/sample/finance')).data.tx.find((x) => x.name === '읽는금액성도');
+        if (t) await hub.del(`/api/ws/sample/finance/tx/${t.id}`);
+        noErrors('재정 입력 보관');
+      }],
       ['행정(예제): 일정 추가 창으로 넣으면 달력에 보인다', async () => {
         await go('/admin?ws=sample');
         await clickText('일정 추가');
@@ -251,7 +284,7 @@ export async function runUi() {
         noErrors('봉사 배정표');
       }],
       ['설정: 새 버전 알림 끄기를 누르면 저장된다', async () => {
-        await go('/settings');
+        await go('/settings?ws=real');   // 프로그램 전체 설정은 실제 교회 화면에서만 바꾼다
         await waitText('새 버전이 나오면 알려 주기');
         await clickText('새 버전이 나오면 알려 주기', 'label');
         await sleep(500);
@@ -536,6 +569,106 @@ export async function runUi() {
         eq(dialogsSeen, [], '입력이 없으면 묻지 않음');
         noErrors('저장 안 한 입력');
       }],
+      ['예배 정보(예제): 설교 제목을 쓰자마자 다른 화면으로 가도 서버에 저장된다', async () => {
+        const wk = await sampleWeek();
+        const before = (await hub.get(`/api/ws/sample/weeks/${wk}`)).data.week.sermonTitle;
+        try {
+          await go(`/week/${wk}?ws=sample`);
+          await typeLabel('설교 제목', '바로떠나기 시험 제목');
+          await page.evaluate(() => [...document.querySelectorAll('a')].find((a) => a.innerText.includes('이번 주 준비함'))?.click());   // 0.7초 기다리지 않고 곧바로
+          let got = '';
+          for (let i = 0; i < 20 && got !== '바로떠나기 시험 제목'; i++) { await sleep(150); got = (await hub.get(`/api/ws/sample/weeks/${wk}`)).data.week.sermonTitle; }
+          eq(got, '바로떠나기 시험 제목', '떠난 뒤 서버의 설교 제목');
+        } finally { await hub.put(`/api/ws/sample/weeks/${wk}`, { sermonTitle: before }); }
+        errors = errors.filter((e) => !/Failed to load resource/.test(e));
+        noErrors('예배 정보 떠나기');
+      }],
+      ['출석(예제): 체크하고 저장하지 않은 채 날짜를 바꾸면 먼저 묻고, [취소]해도 체크는 그 날짜에 보관되어 돌아오면 다시 나온다', async () => {
+        await go('/people/attendance?ws=sample');
+        const dateInput = await page.waitForSelector('label.inline input[type="date"]');
+        const d0 = await dateInput.evaluate((x) => x.value);
+        const saved0 = JSON.stringify((await hub.get('/api/ws/sample/people')).data.attendance[d0] || []);
+        const name = await page.evaluate(() => { const b = [...document.querySelectorAll('button.att')].find((x) => !x.classList.contains('on')); b?.click(); return b?.innerText.trim(); });
+        ok(name, '체크할 성도 단추');
+        await sleep(100);
+        const setDate = (v) => page.evaluate((val) => { const i = document.querySelector('label.inline input[type="date"]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, val); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new Event('change', { bubbles: true })); }, v);
+        dialogsSeen.length = 0; dialogPlan.push(false);   // [취소] = 저장하지 않고 날짜만 바꿈
+        await setDate('2020-01-05'); await sleep(300);
+        ok(dialogsSeen.some((m) => m.includes('아직 저장하지 않았습니다')), '날짜를 바꾸기 전에 물어야 함', dialogsSeen);
+        eq(await page.evaluate(() => document.querySelector('label.inline input[type="date"]').value), '2020-01-05', '바뀐 날짜');
+        await setDate(d0); await sleep(300);
+        await waitText('저장하지 않은 출석 체크를 다시 불러왔습니다');
+        ok(await page.evaluate((n) => [...document.querySelectorAll('button.att.on')].some((b) => b.innerText.replace(/^✓\s*/, '').trim() === n), name), '돌아오면 체크가 다시 보여야 함', name);
+        eq(JSON.stringify((await hub.get('/api/ws/sample/people')).data.attendance[d0] || []), saved0, '서버 출석은 그대로 (저장은 하지 않음)');
+        await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('att-draft:')) localStorage.setItem(k, 'null'); });
+        noErrors('출석 날짜 바꾸기');
+      }],
+      ['녹음 회의록 창(예제): 녹취록을 붙여 넣은 뒤 바깥을 누르면 묻고, [취소]하면 붙여 넣은 글이 남는다', async () => {
+        await go('/admin/minutes?ws=sample');
+        await clickText('녹음으로 회의록 만들기');
+        await clickText('녹취록 글 붙여 넣기');
+        await typeLabel('녹취록', '한 시간 분량 녹취록이라고 칩시다');
+        dialogsSeen.length = 0; dialogPlan.push(false);
+        await page.evaluate(() => document.querySelector('.dialog-back')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+        await sleep(200);
+        ok(dialogsSeen.some((m) => m.includes('저장하지 않은 입력')), '닫기 전에 물어야 함', dialogsSeen);
+        has(await page.evaluate(() => document.querySelector('.dialog textarea')?.value || ''), '한 시간 분량 녹취록', '[취소]하면 글이 남음');
+        dialogPlan.push(true);
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        noErrors('녹음 회의록 창 닫기');
+      }],
+      ['예제 설정: AI 키와 업데이트 알림은 프로그램 전체 설정이라 예제 화면에서는 바꿀 수 없고, 실제 교회 설정에서는 바꿀 수 있다', async () => {
+        await go('/settings?ws=sample');
+        await waitText('프로그램 전체 설정');
+        eq(await page.$('input[aria-label="제미나이 API 키"]'), null, '예제: 키 입력 칸이 없어야 함');
+        eq(await page.evaluate(() => [...document.querySelectorAll('label.check')].find((l) => l.innerText.includes('새 버전이 나오면'))?.querySelector('input')?.disabled), true, '예제: 업데이트 알림 바꾸기 막힘');
+        await go('/settings?ws=real');
+        await waitText('AI 연결');
+        ok(await page.$('input[aria-label="제미나이 API 키"]'), '실제 교회: 키 입력 칸이 있어야 함');
+        noErrors('예제 설정');
+      }],
+      ['키보드(예제): 창을 열면 초점이 창 안으로 가고 Escape 로 닫히며(입력이 있으면 묻고), 장부 줄은 Tab·Enter 로 연다', async () => {
+        await go('/people?ws=sample');
+        await clickText('성도 추가');
+        await page.waitForSelector('.dialog');
+        ok(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]')), '초점이 창 안에 있어야 함');
+        ok(await page.evaluate(() => { const d = document.querySelector('[role="dialog"]'); const id = d?.getAttribute('aria-labelledby'); return !!id && !!document.getElementById(id)?.innerText; }), '창 제목이 창 이름으로 이어져야 함');
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        await clickText('성도 추가');
+        await typeLabel('이름', '이스케이프시험');
+        dialogsSeen.length = 0; dialogPlan.push(false);
+        await page.keyboard.press('Escape'); await sleep(200);
+        ok(dialogsSeen.some((m) => m.includes('저장하지 않은 입력')), 'Escape 도 저장 안 한 입력이 있으면 물어야 함', dialogsSeen);
+        ok(await page.$('.dialog'), '[취소]하면 창이 그대로');
+        dialogPlan.push(true); await page.keyboard.press('Escape');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        await go('/finance?ws=sample');
+        for (let i = 0; i < 12 && !(await page.$('.fin-table tbody tr[role="button"]')); i++) { await page.click('button[aria-label="지난달"]'); await sleep(150); }   // 기록이 있는 달까지
+        await page.waitForSelector('.fin-table tbody tr[role="button"]');
+        await page.focus('.fin-table tbody tr[role="button"]');
+        await page.keyboard.press('Enter');
+        await waitText('장부 기록 고치기');
+        await page.keyboard.press('Escape');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        noErrors('키보드');
+      }],
+      ['봉사 칸(예제): 이름 단추로만 바꿔도 닫기 전에 묻는다', async () => {
+        await go('/admin/serve?ws=sample');
+        await page.evaluate(() => document.querySelector('.serve-cell')?.click());
+        await page.waitForSelector('.dialog .chip');
+        await page.evaluate(() => document.querySelector('.dialog .chip')?.click());
+        dialogsSeen.length = 0; dialogPlan.push(false);
+        await page.evaluate(() => document.querySelector('.dialog-back')?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+        await sleep(200);
+        ok(dialogsSeen.some((m) => m.includes('저장하지 않은 입력')), '단추로 바꾼 뒤 닫기 전에 물어야 함', dialogsSeen);
+        ok(await page.$('.dialog'), '[취소]하면 창이 그대로');
+        dialogPlan.push(true);
+        await clickText('닫기', '.dialog button');
+        await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
+        noErrors('봉사 칸 닫기');
+      }],
       ['주보 편집 저장 안 한 글(예제): 고치던 글이 있으면 닫기 전에 묻고, 저장 못 한 채 화면을 떠났다 다시 열면 그 글을 되살린다 (일부러 닫으면 버림)', async () => {
         const wk = await sampleWeek();
         await go(`/week/${wk}/outputs?ws=sample`);
@@ -580,7 +713,7 @@ export async function runUi() {
         noErrors('주보 분량');
       }],
       ['제미나이 연결(설정): AI 연결 칸에 API 키를 넣고 저장하면 연결됨으로 바뀌고 입력 칸은 비며, 지우면 다시 연결 안 됨', async () => {
-        await go('/settings?ws=sample');
+        await go('/settings?ws=real');   // 예제 화면에서는 프로그램 전체 설정인 AI 키를 바꿀 수 없다 (예제 설정 점검 참고)
         await waitText('AI 연결');
         const gem = () => page.evaluate(() => [...document.querySelectorAll('.ai-list li')].find((li) => li.innerText.includes('제미나이'))?.innerText || '');
         has(await gem(), '연결 안 됨', '처음에는 연결 안 됨');

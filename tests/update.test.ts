@@ -11,7 +11,8 @@ import { spawn, type ChildProcess } from 'node:child_process';
 // @ts-ignore 서버 모듈은 JS
 import { cmpVer, pickRuntime } from '../server/boot.mjs';
 // @ts-ignore 서버 모듈은 JS
-import { sumFor, unzip, notesExcerpt, verifySums } from '../server/update.mjs';
+import { sumFor, unzip, notesExcerpt, verifySums, pruneOldVersions } from '../server/update.mjs';
+import { spawnSync } from 'node:child_process';
 // @ts-ignore 서버 모듈은 JS
 import { TRUSTED_KEYS } from '../server/update-keys.mjs';
 
@@ -103,6 +104,44 @@ describe('업데이트 · 작은 부품', () => {
   });
 });
 
+describe('업데이트 · 두 번째 업데이트부터 되돌아갈 곳 지키기', () => {
+  const mk = (dir: string, v: string, main = '') => { fs.mkdirSync(path.join(dir, v, 'server'), { recursive: true }); fs.writeFileSync(path.join(dir, v, 'package.json'), JSON.stringify({ version: v })); fs.writeFileSync(path.join(dir, v, 'server', 'main.mjs'), main); };
+  it('옛 버전 정리는 지금 도는 버전과 current 가 가리키는 버전을 남긴다', () => {
+    const data = tmp('prune'); cleanup.push(() => fs.rmSync(data, { recursive: true, force: true }));
+    const upd = path.join(data, 'app-update');
+    for (const v of ['9.0.0', '9.1.0', '9.2.0']) mk(upd, v);
+    fs.writeFileSync(path.join(upd, 'current.json'), JSON.stringify({ version: '9.2.0' }));
+    expect(pruneOldVersions(data, '9.1.0')).toEqual(['9.0.0']);
+    expect(fs.readdirSync(upd).sort()).toEqual(['9.1.0', '9.2.0', 'current.json']);
+  });
+  it('새 버전 본체를 불러오지 못하면 그 버전만 치우고, 앞 버전(지금 돌던 본체)으로 current 를 되돌린다', () => {
+    // 앱 폴더: 실제 index.mjs·boot.mjs 와, 켜지면 표시만 남기는 가짜 main.mjs
+    const app = tmp('idx'), data = tmp('idx-data');
+    cleanup.push(() => { fs.rmSync(app, { recursive: true, force: true }); fs.rmSync(data, { recursive: true, force: true }); });
+    fs.mkdirSync(path.join(app, 'server'));
+    for (const f of ['index.mjs', 'boot.mjs']) fs.copyFileSync(path.join(HUB, 'server', f), path.join(app, 'server', f));
+    fs.writeFileSync(path.join(app, 'package.json'), JSON.stringify({ version: '1.0.0' }));
+    fs.writeFileSync(path.join(app, 'server', 'main.mjs'), "import fs from 'node:fs'; fs.writeFileSync(process.env.MARK, 'bundled');\n");
+    const upd = path.join(data, 'app-update');
+    mk(upd, '9.1.0');                                              // 지금 돌던 받은 버전
+    mk(upd, '9.2.0', "throw new Error('망가진 새 버전');\n");       // 방금 받은 새 버전
+    fs.writeFileSync(path.join(upd, 'current.json'), JSON.stringify({ version: '9.2.0', from: '9.1.0' }));
+    const mark = path.join(data, 'mark.txt');
+    const r = spawnSync(process.execPath, [path.join(app, 'server', 'index.mjs')], { env: { ...process.env, HUB_DATA_DIR: data, MARK: mark }, encoding: 'utf8' });
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(mark, 'utf8')).toBe('bundled');
+    expect(fs.existsSync(path.join(upd, '9.2.0'))).toBe(false);
+    expect(fs.existsSync(path.join(upd, '9.1.0', 'server', 'main.mjs'))).toBe(true);   // 예전에는 app-update 를 통째로 지웠다
+    expect(JSON.parse(fs.readFileSync(path.join(upd, 'current.json'), 'utf8')).version).toBe('9.1.0');
+  });
+  it('설치 코드는 받는 순간 옛 버전 폴더를 지우지 않는다 (새 버전이 켜진 뒤 정리)', () => {
+    const src = fs.readFileSync(path.join(HUB, 'server', 'update.mjs'), 'utf8');
+    const install = src.slice(src.indexOf('const final = path.join(dir, ver)'), src.indexOf("job.phase = 'restarting'"));
+    expect(install).not.toMatch(/readdirSync\(dir\)[^\n]*rmSync/);
+    expect(fs.readFileSync(path.join(HUB, 'server', 'main.mjs'), 'utf8')).toMatch(/pruneOldVersions\(DATA_DIR, VERSION\)/);
+  });
+});
+
 describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
   it('서명 없음·남의 서명·바뀐 목록·확인값 틀림은 거절 → 맞으면 설치 → 새 버전으로 다시 켜짐 → 자료 그대로 → 망가진 버전은 앱 버전으로', async () => {
     const NEW = '9.9.9';
@@ -136,7 +175,8 @@ describe('업데이트 · 가짜 배포 서버로 끝까지', () => {
     const relBase = `http://127.0.0.1:${(rel.address() as net.AddressInfo).port}`;
     const port = await freePort();
     const H = `http://127.0.0.1:${port}`;
-    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/`, UPDATE_EXTRA_KEYS: pubB64, HUB_LOG_DIR: tmp('log') };   // 다시 켜기 기록도 시험 폴더에 (실제 기록 파일에 쓰지 않게)
+    const logDir = tmp('log'); cleanup.push(() => fs.rmSync(logDir, { recursive: true, force: true }));
+    const env = { ...process.env, PORT: String(port), HUB_DATA_DIR: data, WC_URL: 'http://127.0.0.1:9', UPDATE_LATEST_URL: `${relBase}/latest`, UPDATE_ALLOWED_PREFIX: `${relBase}/releases/download/`, UPDATE_EXTRA_KEYS: pubB64, HUB_LOG_DIR: logDir };   // 다시 켜기 기록도 시험 폴더에 (실제 기록 파일에 쓰지 않게)
     delete (env as any).HUB_APP_ROOT; delete (env as any).BUNDLE_DIR;
     const pids = new Set<number>();
     cleanup.push(() => { for (const p of pids) try { process.kill(p); } catch { /* 이미 끝남 */ } });

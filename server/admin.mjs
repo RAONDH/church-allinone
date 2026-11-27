@@ -56,7 +56,7 @@ export function cleanServeRoles(list, members = {}) {
     seen.add(name);
     const id = /^[a-z0-9]{1,24}$/.test(r?.id || '') ? r.id : uid();
     const count = Math.max(1, Math.min(5, Math.round(+r?.count || 1)));
-    return { id, name, count, pool: [...new Set((Array.isArray(r?.pool) ? r.pool : []).filter((x) => members[x]))] };
+    return { id, name, count, pool: [...new Set((Array.isArray(r?.pool) ? r.pool : []).filter((x) => typeof x === 'string' && Object.prototype.hasOwnProperty.call(members, x)))] };
   });
 }
 /** 날짜별 배정 고치기: { 'YYYY-MM-DD': { 역할id: [..] } } — 빈 날은 지운다 */
@@ -268,7 +268,10 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
       const size = fs.statSync(f).size, type = { wav: 'audio/wav', mp3: 'audio/mpeg', ogg: 'audio/ogg', flac: 'audio/flac' }[path.extname(f).slice(1)] || 'application/octet-stream';
       const range = String(req.headers.range || '').match(/bytes=(\d*)-(\d*)/);
       if (range) {
-        const a = range[1] ? +range[1] : 0, b = range[2] ? Math.min(+range[2], size - 1) : size - 1;
+        // 'bytes=-500' 은 끝에서 500바이트. 범위가 맞지 않으면 416 (잘못된 범위로 서버가 꺼지지 않게)
+        let a = range[1] ? +range[1] : 0, b = range[2] ? Math.min(+range[2], size - 1) : size - 1;
+        if (!range[1] && range[2]) { a = Math.max(0, size - +range[2]); b = size - 1; }
+        if (!(a <= b && a < size)) { res.writeHead(416, { 'Content-Range': `bytes */${size}` }); res.end(); return true; }
         res.writeHead(206, { 'Content-Type': type, 'Content-Range': `bytes ${a}-${b}/${size}`, 'Accept-Ranges': 'bytes', 'Content-Length': b - a + 1 });
         fs.createReadStream(f, { start: a, end: b }).pipe(res);
       } else {

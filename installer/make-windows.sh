@@ -87,7 +87,8 @@ cp "$SEXE" "$ROOT/apps/설교 쇼츠 메이커 설치.exe"
 echo "▶ HWP/PDF 변환기 (공개 저장소)"
 HWPD="$ROOT/apps/hwp-pdf-to-markdown"
 mkdir -p "$HWPD"
-curl -sfL "https://codeload.github.com/raon-easypaster/hwp-pdf-to-markdown/tar.gz/refs/heads/main" | tar -xz -C "$HWPD" --strip-components 1
+. "$HUB/installer/pins.sh"   # 고정한 커밋으로 받는다
+curl -sfL "https://codeload.github.com/$HWP_REPO/tar.gz/$HWP_COMMIT" | tar -xz -C "$HWPD" --strip-components 1
 [ -f "$HWPD/app.py" ] || { echo "HWP/PDF 변환기를 받지 못했습니다"; exit 1; }
 # 올인원이 창 없이 켜는 실행 파일 (영문만). 파이썬이 없으면 PYTHON_MISSING 을 남기고 끝낸다
 sed 's/$/\r/' "$HUB/installer/windows/hwp-start-hub.cmd" > "$HWPD/start-hub.cmd"

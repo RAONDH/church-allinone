@@ -104,15 +104,19 @@ function codexModels() {
   } catch { /* 없음 */ }
   return [...new Set([...list.filter(Boolean), null])].slice(0, 4);
 }
+export const CODEX_ARGS = (outFile, model) => ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '--disable', 'shell_tool', '-o', outFile, ...(model ? ['-m', model] : []), '-'];
 async function withCodex(system, prompt) {
   let last = '';
   for (const model of codexModels()) {
     const outFile = path.join(WORK_DIR, `codex-${process.pid}-${Date.now()}.txt`);
-    const r = await runCli('codex', ['exec', '--skip-git-repo-check', '--ephemeral', '-s', 'read-only', '-o', outFile, ...(model ? ['-m', model] : []), '-'],
+    // 읽기 전용 샌드박스만으로는 셸로 이 컴퓨터의 파일(성도·재정 자료)을 읽을 수 있다 → 셸 도구를 꺼서 글만 주고받게 한다
+    const r = await runCli('codex', CODEX_ARGS(outFile, model),
       `${system}\n\n---\n\n${prompt}`, AI_TIMEOUT);
     let text = ''; try { text = fs.readFileSync(outFile, 'utf8'); fs.unlinkSync(outFile); } catch { /* 없음 */ }
     if (r.code === 0 && text.trim()) return text;
     last = (r.err.match(/"message":"([^"]+)"/) || [])[1] || r.err.trim().split('\n').pop() || `종료 코드 ${r.code}`;
+    // 셸 도구를 끄는 설정을 모르는 옛 Codex 는 쓰지 않는다 (끄지 못한 채 돌리면 파일을 읽을 수 있음)
+    if (/shell_tool|unknown feature|unexpected argument '--disable'/i.test(last)) throw new AiError('설치된 ChatGPT(Codex)가 오래되어 안전하게 쓸 수 없습니다. 터미널에서 npm i -g @openai/codex 로 새 버전을 설치해 주세요.', 'login');
     if (/not logged in|unauthorized/i.test(last) && !/model/i.test(last)) throw new AiError('ChatGPT(Codex)에 로그인되어 있지 않습니다. 터미널에서 codex login 을 실행해 주세요.', 'login');
     if (/usage limit|rate limit/i.test(last)) throw new AiError(`ChatGPT 구독 사용 한도에 걸렸습니다: ${last.slice(0, 200)}`, 'limit');
     if (!/model/i.test(last)) break;

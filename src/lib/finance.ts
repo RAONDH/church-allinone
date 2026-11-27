@@ -6,11 +6,12 @@ export const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 export const isCarry = (cat: string) => /이월금$/.test(cat);
 const sum = (xs: Tx[]) => xs.reduce((s, t) => s + t.amount, 0);
 
-/** 기간 안 수입·지출·차액 */
+/** 기간 안 수입·지출·차액. 이월금은 그 기간의 수입이 아니므로 따로 센다 (보고서의 월별 수입과 같은 기준) */
 export function totals(tx: Tx[], from: string, to: string) {
   const xs = tx.filter((t) => t.date >= from && t.date <= to);
-  const income = sum(xs.filter((t) => t.type === 'income')), expense = sum(xs.filter((t) => t.type === 'expense'));
-  return { income, expense, net: income - expense, count: xs.length };
+  const income = sum(xs.filter((t) => t.type === 'income' && !isCarry(t.category))), expense = sum(xs.filter((t) => t.type === 'expense'));
+  const carry = sum(xs.filter((t) => t.type === 'income' && isCarry(t.category)));
+  return { income, expense, net: income - expense, carry, count: xs.length };
 }
 
 /** 그날까지 재정별 잔액 (이월금 포함 전체 누적) */
@@ -70,11 +71,24 @@ export function donorMonths(d: Donor) {
 
 /** 금액 입력: 1,000 / 1만 / 3만5천 / 150000원 */
 export function parseWon(s: string): number {
-  const x = String(s).replace(/[,\s원₩]/g, '');
+  // '3만원정'·'₩30,000' 처럼 적어도, '3.5만'처럼 소수점을 써도 알아듣는다
+  const x = String(s).replace(/[,\s원₩]/g, '').replace(/정$/, '');
   if (!x) return 0;
   if (/^\d+$/.test(x)) return +x;
-  const m = x.match(/^(?:(\d+)억)?(?:(\d+)천만)?(?:(\d+)만)?(?:(\d+)천)?(?:(\d+))?$/);
+  const N = '(\\d+(?:\\.\\d+)?)';
+  const m = x.match(new RegExp(`^(?:${N}억)?(?:${N}천만)?(?:${N}만)?(?:${N}천)?(?:(\\d+))?$`));
   if (!m || !m[0]) return 0;
   const [, eok, cheonman, man, cheon, rest] = m.map((v) => (v ? +v : 0));
-  return eok * 1e8 + cheonman * 1e7 + man * 1e4 + cheon * 1e3 + rest;
+  return Math.round(eok * 1e8 + cheonman * 1e7 + man * 1e4 + cheon * 1e3 + rest);
+}
+
+/**
+ * 예산 칸 이름: 수입/지출·재정·항목을 함께 쓴다 (예: 'expense/일반재정/기타').
+ * 예전에는 항목 이름만 써서, 수입 '기타'와 지출 '기타'처럼 이름이 같은 항목의 예산이 섞였다.
+ * 예전 방식(이름만)으로 저장된 예산은 새 칸이 없을 때만 읽는다.
+ */
+export const budgetKey = (type: 'income' | 'expense', fund: string, c: string) => `${type}/${fund}/${c}`;
+export function budgetOf(budget: Record<string, number>, type: 'income' | 'expense', fund: string, c: string) {
+  const k = budgetKey(type, fund, c);
+  return Object.prototype.hasOwnProperty.call(budget, k) ? budget[k] : budget[c] || 0;
 }
