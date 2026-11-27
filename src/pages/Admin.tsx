@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
 import { clickable } from '../lib/a11y';
-import { api } from '../lib/api';
+import { api, peopleOrLocked } from '../lib/api';
 import type { Admin as AdminData, Cert, ChurchEvent, GcalCal, Member, Visit } from '../lib/types';
 import { eventsOn, monthGrid, upcomingEvents } from '../lib/admin';
 import { nextBirthday } from '../lib/people';
@@ -20,26 +20,28 @@ export function useAdmin() {
   const [members, setMembers] = useState<Member[]>([]);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [err, setErr] = useState('');
+  const [peopleLocked, setPeopleLocked] = useState(false);
   const load = useCallback(async () => {
     try {
-      const [a, p] = await Promise.all([api<AdminData>(`${base}/admin`), api<{ members: Member[]; visits: Visit[] }>(`${base}/people`)]);
-      setData(a); setMembers(p.members); setVisits(p.visits); setErr('');
+      const [a, p] = await Promise.all([api<AdminData>(`${base}/admin`), peopleOrLocked<{ members: Member[]; visits: Visit[] }>(base, { members: [], visits: [] })]);
+      setData(a); setMembers(p.members); setVisits(p.visits); setPeopleLocked(!!p.peopleLocked); setErr('');
     } catch (e: any) { setErr(e.message); }
   }, [base]);
   useEffect(() => { load(); }, [load]);
-  return { data, members, visits, err, load };
+  return { data, members, visits, err, load, peopleLocked };
 }
 
 export default function Admin() {
   const { tab = 'calendar' } = useParams();
   const nav = useNavigate();
-  const { data, members, visits, err, load } = useAdmin();
+  const { data, members, visits, err, load, peopleLocked } = useAdmin();
   const t = TABS.some(([k]) => k === tab) ? tab : 'calendar';
   return (
     <section>
       <div className="home-head"><div><h1>행정</h1><p className="muted small">🔒 행정 자료도 이 컴퓨터에만 저장됩니다.</p></div></div>
       <div className="tabs">{TABS.map(([k, l]) => <button key={k} className={t === k ? 'on' : ''} onClick={() => nav(`/admin/${k}`)}>{l}</button>)}</div>
       {err && <p className="alert err">{err} <button onClick={load}>다시 시도</button></p>}
+      {peopleLocked && <p className="alert info small people-locked">🔒 성도 정보가 잠겨 있어 성도 이름 연결·주소는 보이지 않습니다. 성도 화면에서 잠금 암호를 넣어 풀면 함께 보입니다.</p>}
       {!data ? (!err && <p className="muted">불러오는 중…</p>)
         : t === 'calendar' ? <Calendar data={data} members={members} visits={visits} reload={load} />
         : t === 'minutes' ? <MinutesTab data={data} reload={load} />

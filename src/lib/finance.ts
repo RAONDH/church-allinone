@@ -14,10 +14,19 @@ export function totals(tx: Tx[], from: string, to: string) {
   return { income, expense, net: income - expense, carry, count: xs.length };
 }
 
-/** 그날까지 재정별 잔액 (이월금 포함 전체 누적) */
+/** 그날까지 재정별 잔액 (가장 최근 이월금을 시작 잔액으로) */
 export function balances(tx: Tx[], until: string) {
+  // 이월금은 '그날의 시작 잔액'이다. 재정마다 그날(until)까지 가장 최근에 적은 이월금 날짜부터 새로 센다:
+  // 그 날의 이월금 + 그 날부터의 수입·지출. 그 앞 기록은 이미 이월금에 들어 있으므로 다시 더하지 않는다 (새해 이월금을 넣으면 잔액이 두 번 잡히던 문제)
   const out = Object.fromEntries(FUNDS.map((f) => [f, 0])) as Record<Fund, number>;
-  for (const t of tx) if (t.date <= until) out[t.fund] = (out[t.fund] || 0) + (t.type === 'income' ? t.amount : -t.amount);
+  const upto = tx.filter((t) => t.date <= until);
+  const start: Partial<Record<string, string>> = {};
+  for (const t of upto) if (t.type === 'income' && isCarry(t.category) && (!start[t.fund] || t.date > start[t.fund]!)) start[t.fund] = t.date;
+  for (const t of upto) {
+    const s = start[t.fund];
+    if (s && t.date < s) continue;   // 이월금 앞의 기록(앞선 해의 이월금 포함)은 이미 그 이월금에 들어 있음
+    out[t.fund] = (out[t.fund] || 0) + (t.type === 'income' ? t.amount : -t.amount);
+  }
   return out;
 }
 
@@ -40,22 +49,35 @@ export function monthly(tx: Tx[], year: string) {
   });
 }
 
-export interface Donor { key: string; name: string; member: Member | null; total: number; count: number; tx: Tx[] }
-/** 기부금 영수증용 헌금자별 합계 (이월금·이름 없는 기록·'무명' 제외). 명부와 연결된 기록은 성도 기준으로 모은다. */
-export function donors(tx: Tx[], year: string, members: Member[]): Donor[] {
+/**
+ * 기부금 영수증에 넣는 수입 항목인지. 기본은 이름이 '헌금'으로 끝나거나 십일조·헌물·연보인 항목만
+ * (차입금·이자·기타수입·이월금처럼 헌금이 아닌 수입은 빼고), 항목 탭에서 항목마다 바꿀 수 있다.
+ */
+export const receiptDefault = (cat: string) => !isCarry(cat) && /(헌금|십일조|헌물|연보)$/.test(cat.trim());
+export function isReceiptCat(cat: string, override?: Record<string, boolean>) {
+  if (isCarry(cat)) return false;
+  return override && Object.prototype.hasOwnProperty.call(override, cat) ? !!override[cat] : receiptDefault(cat);
+}
+
+/** ambiguous: 이름만 적혔는데 명부에 같은 이름이 두 분 이상이라 누구 헌금인지 모르는 기록 묶음 (영수증을 만들지 않고 확인을 요청) */
+export interface Donor { key: string; name: string; member: Member | null; total: number; count: number; tx: Tx[]; ambiguous?: boolean }
+/** 기부금 영수증용 헌금자별 합계 (영수증 대상이 아닌 항목·이월금·이름 없는 기록·'무명' 제외). 명부와 연결된 기록은 성도 기준으로 모은다. */
+export function donors(tx: Tx[], year: string, members: Member[], override?: Record<string, boolean>): Donor[] {
   const byId = new Map(members.map((m) => [m.id, m]));
   const counts = new Map<string, number>();
   for (const m of members) counts.set(m.name, (counts.get(m.name) || 0) + 1);
   const byName = new Map(members.filter((m) => counts.get(m.name) === 1).map((m) => [m.name, m]));
   const map = new Map<string, Donor>();
   for (const t of tx) {
-    if (t.type !== 'income' || !t.date.startsWith(year) || isCarry(t.category)) continue;
+    if (t.type !== 'income' || !t.date.startsWith(year) || !isReceiptCat(t.category, override)) continue;
     // 명부와 이어진 기록은 그 성도로, 이름만 적힌 기록도 명부에 같은 이름이 한 분뿐이면 그분으로 (주소가 영수증에 들어가게)
     const member = (t.memberId && byId.get(t.memberId)) || (!t.memberId && byName.get(t.name.trim())) || null;
     const name = member?.name || t.name.trim();
     if (!name || /^(무명|익명)$/.test(name)) continue;
-    const key = member ? `m:${member.id}` : `n:${name}`;
-    const d = map.get(key) || { key, name, member, total: 0, count: 0, tx: [] };
+    // 명부에 같은 이름이 두 분 이상인데 어느 분인지 이어 두지 않은 기록: 한 사람 것으로 합치지 않고 '확인 필요'로 따로
+    const ambiguous = !member && (counts.get(name) || 0) > 1;
+    const key = member ? `m:${member.id}` : ambiguous ? `dup:${name}` : `n:${name}`;
+    const d = map.get(key) || { key, name, member, total: 0, count: 0, tx: [], ...(ambiguous ? { ambiguous: true } : {}) };
     d.total += t.amount; d.count++; d.tx.push(t);
     map.set(key, d);
   }

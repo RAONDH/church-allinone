@@ -104,35 +104,44 @@ const HEAD: [RegExp, string][] = [
   [/^(전화|연락처|휴대폰|핸드폰|전화번호|휴대전화)$/, 'phone'], [/^주소$/, 'address'], [/^(직분|직책)$/, 'role'],
   [/^(구역|소그룹|목장|셀|교구|부서)$/, 'group'], [/^(세례|세례여부|신급)$/, 'baptism'], [/^(등록일|등록일자|등록)$/, 'registeredAt'],
   [/^(가족|세대주|가정)$/, 'family'], [/^(관계|가족관계)$/, 'relation'], [/^(메모|비고|특이사항)$/, 'memo'],
+  [/^(상태|교적상태|교적)$/, 'status'], [/^윤달$/, 'lunarLeap'],
 ];
 export function parsePaste(text: string): { rows: Record<string, string>[]; columns: string[]; unknown: string[] } {
-  const lines = text.replace(/\r/g, '').split('\n').filter((l) => l.trim());
-  if (!lines.length) return { rows: [], columns: [], unknown: [] };
-  const sep = lines[0].includes('\t') ? '\t' : ',';
-  const split = (l: string) => (sep === ',' ? splitCsv(l) : l.split('\t')).map((c) => c.trim());
-  const head = split(lines[0]).map((h) => HEAD.find(([re]) => re.test(h.replace(/\s/g, '')))?.[1] || '');
+  const src = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const first = src.split('\n').find((l) => l.trim()) || '';
+  if (!first) return { rows: [], columns: [], unknown: [] };
+  const sep = first.includes('\t') ? '\t' : ',';
+  // 따옴표로 묶은 칸 안의 줄바꿈(여러 줄 메모)은 한 칸으로 읽는다 (줄마다 나누면 메모 둘째 줄이 가짜 성도가 됨)
+  const table = splitTable(src, sep).map((r) => r.map((c) => c.trim())).filter((r) => r.some((c) => c));
+  const headRow = table[0];
+  const head = headRow.map((h) => HEAD.find(([re]) => re.test(h.replace(/\s/g, '')))?.[1] || '');
   if (!head.includes('name')) {
     // 칸 이름이 없으면 한 줄에 한 분, 첫 칸은 이름
-    return { rows: lines.map((l) => ({ name: split(l)[0] })).filter((r) => r.name), columns: ['name'], unknown: [] };
+    return { rows: table.map((r) => ({ name: r[0] })).filter((r) => r.name), columns: ['name'], unknown: [] };
   }
-  const unknown = split(lines[0]).filter((_, i) => !head[i] && split(lines[0])[i]);
-  const rows = lines.slice(1).map((l) => {
-    const cells = split(l), r: Record<string, string> = {};
+  const unknown = headRow.filter((_, i) => !head[i] && headRow[i]);
+  const rows = table.slice(1).map((cells) => {
+    const r: Record<string, string> = {};
     head.forEach((k, i) => { if (k && cells[i]) r[k] = cells[i]; });
     if (r.lunar && /^양/.test(r.lunar)) delete r.lunar;
+    for (const k of Object.keys(r)) r[k] = r[k].replace(/^'(?=[=+\-@])/, '');   // 내보낼 때 수식으로 실행되지 않게 붙인 ' 떼기
     return r;
   }).filter((r) => r.name);
   return { rows, columns: head.filter(Boolean), unknown };
 }
-function splitCsv(l: string) {
-  const out: string[] = []; let cur = '', q = false;
-  for (let i = 0; i < l.length; i++) {
-    const c = l[i];
-    if (q) { if (c === '"' && l[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
-    else if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c;
+/** 쉼표·탭으로 나눈 표 읽기. 따옴표 안의 쉼표·줄바꿈·"" 는 칸 안의 글자로 */
+export function splitTable(text: string, sep: string) {
+  const rows: string[][] = []; let row: string[] = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; } else if (c === '"') q = false; else cur += c; }
+    else if (c === '"' && cur.trim() === '') { q = true; cur = ''; }
+    else if (c === sep) { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += c;
   }
-  out.push(cur);
-  return out;
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows;
 }
 
 /** 오늘이 주일이면 오늘, 아니면 지난 주일 */

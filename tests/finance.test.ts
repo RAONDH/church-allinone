@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore 서버 모듈은 JS
 import { importLedger, emptyFinance, cleanTx, financeCsv, matchMember } from '../server/finance.mjs';
-import { balances, budgetKey, budgetOf, donors, donorMonths, monthly, parseWon, totals } from '../src/lib/finance';
+import { balances, budgetKey, budgetOf, donors, isReceiptCat, donorMonths, monthly, parseWon, totals } from '../src/lib/finance';
 import type { Member, Tx } from '../src/lib/types';
 
 const M = (id: string, name: string): Member => ({ id, name, gender: '', birth: '', lunar: false, phone: '', address: '주소' + id, role: '', group: '', baptism: '', registeredAt: '', status: 'active', familyId: '', relation: '', memo: '', createdAt: 0, updatedAt: 0 });
@@ -79,3 +79,35 @@ describe('영수증 주소', () => {
     expect(d.map((x) => [x.name, x.total, x.member?.address || ''])).toEqual([['김영희', 2, ''], ['홍길동', 6, '주소a']]);
   });
 });
+
+describe('기부금 영수증 대상·동명이인', () => {
+  it('차입금·이자·기타수입처럼 헌금이 아닌 수입은 이름이 있어도 영수증 합계에 넣지 않고, 항목마다 바꿀 수 있다', () => {
+    const ms = [M('a', '홍길동')];
+    const tx = [T({ memberId: 'a', category: '십일조', amount: 100 }), T({ memberId: 'a', category: '차입금', amount: 1000000 }), T({ memberId: 'a', category: '기타수입', amount: 7 }), T({ memberId: 'a', category: '건축헌금', amount: 20 })];
+    expect(donors(tx, '2026', ms)[0].total).toBe(120);
+    expect(donors(tx, '2026', ms, { 기타수입: true })[0].total).toBe(127);   // 항목 탭에서 넣기로 정함
+    expect(donors(tx, '2026', ms, { 건축헌금: false })[0].total).toBe(100);
+    expect(['주일헌금', '십일조', '차입금', '이자수입', '일반이월금'].map((c) => isReceiptCat(c))).toEqual([true, true, false, false, false]);
+  });
+  it('명부에 같은 이름이 두 분인데 어느 분인지 이어 두지 않은 헌금은 한 사람 것으로 합치지 않고 확인 필요로 둔다', () => {
+    const ms = [M('a', '김영희'), M('b', '김영희')];
+    const d = donors([T({ name: '김영희', amount: 5 }), T({ name: '김영희', amount: 7 }), T({ memberId: 'b', name: '김영희', amount: 3 })], '2026', ms);
+    const amb = d.find((x) => x.ambiguous)!;
+    expect([amb.total, amb.member]).toEqual([12, null]);
+    expect(d.find((x) => x.member?.id === 'b')?.total).toBe(3);   // 어느 분인지 고른 기록은 그분 것으로
+  });
+});
+
+describe('이월금과 잔액', () => {
+  it('새해 이월금을 적으면 그날부터 새로 세어, 지난해 잔액이 두 번 더해지지 않는다', () => {
+    const tx = [
+      T({ category: '일반이월금', date: '2025-01-01', amount: 300000 }), T({ date: '2025-06-01', amount: 900000 }), T({ type: 'expense', category: '교제비', date: '2025-07-01', amount: 200000 }),
+      T({ category: '일반이월금', date: '2026-01-01', amount: 1000000 }), T({ date: '2026-01-04', amount: 50000 }),
+      T({ fund: '특별재정', category: '선교헌금', date: '2025-03-01', amount: 7 }),
+    ];
+    expect(balances(tx, '2025-12-31').일반재정).toBe(1000000);    // 지난해 말 잔액
+    expect(balances(tx, '2026-01-31').일반재정).toBe(1050000);    // 예전에는 2,050,000 (지난해 잔액 + 이월금)
+    expect(balances(tx, '2026-01-31').특별재정).toBe(7);          // 이월금이 없는 재정은 그대로 누적
+  });
+});
+

@@ -257,6 +257,7 @@ async function api(req, res, url) {
   // 잠금을 켰으면 상태 보기만 빼고 모든 백업 기능(폴더 바꾸기·지금 백업·받기·되살리기)은 암호 뒤에
   if (p.startsWith('/api/backup/')) await wrapB(() => lock.guardAny(spaces.real.store.db, req));
   if (p === '/api/backup/settings' && req.method === 'PUT') { const b = await body(req); const r = await wrapB(() => backups.setDir(b.dir)); return send(res, 200, { ...backups.view(), result: r }); }
+  if (p === '/api/backup/verify' && req.method === 'POST') return send(res, 200, backups.verify());   // 복원 확인 (읽기만 함)
   if (p === '/api/backup/now' && req.method === 'POST') { const r = await backups.external(true); return send(res, 200, { ...backups.view(), result: r }); }
   if (p === '/api/backup/download' && req.method === 'GET') { await backups.download(res, Number(url.searchParams.get('part') || 0)); return; }
   if (p === '/api/backup/restore-local' && req.method === 'POST') { const b = await body(req); return send(res, 200, await wrapB(() => backups.restoreLocal(b.file))); }

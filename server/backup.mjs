@@ -43,7 +43,50 @@ export async function streamZip(res, entries) {
 export function checkRestore(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw bad('라온 교회 올인원 백업 파일이 아닙니다.');
   if (typeof obj.weeks !== 'object' || !('church' in obj)) throw bad('라온 교회 올인원 백업 파일이 아닙니다. (예배 기록·교회 정보가 없음)');
+  checkShape(obj);
   return obj;
+}
+
+// 되살리기 전에 자료 모양을 본다: 모양이 틀린 자료를 받아들이면 화면이 열리지 않으므로, 틀렸으면 되살리지 않고 지금 자료를 그대로 둔다
+/** 두 파일 내용이 같은지 (크기 먼저, 같으면 내용) */
+function sameFile(a, b) {
+  try { if (fs.statSync(a).size !== fs.statSync(b).size) return false; return fs.readFileSync(a).equals(fs.readFileSync(b)); } catch { return false; }
+}
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+function checkShape(db) {
+  const no = (where) => { throw bad(`백업 파일의 자료 모양이 맞지 않아 되살리지 않았습니다 (${where}). 지금 자료는 그대로입니다. 다른 백업을 골라 주세요.`); };
+  const coll = (key, label, each) => {
+    if (db[key] === undefined || db[key] === null) return;
+    if (!isObj(db[key])) no(`${label} 묶음`);
+    for (const [k, v] of Object.entries(db[key])) { if (!isObj(v)) no(`${label} ${k}`); each?.(v, k); }
+  };
+  const optStr = (v, where) => { if (v !== undefined && v !== null && typeof v !== 'string') no(where); };
+  if (db.church !== null && db.church !== undefined) { if (!isObj(db.church)) no('교회 정보'); optStr(db.church.name, '교회 이름'); }
+  if (!isObj(db.weeks)) no('예배 기록 묶음');
+  coll('weeks', '예배 기록', (w, k) => {
+    if (typeof w.id !== 'string') no(`예배 기록 ${k}의 번호`);
+    if (w.date !== undefined && !(typeof w.date === 'string' && DAY.test(w.date))) no(`예배 기록 ${k}의 날짜`);
+    for (const f of ['name', 'passage', 'sermonTitle', 'sermonNotes', 'prayerLeader']) optStr(w[f], `예배 기록 ${k}의 ${f}`);
+    if (w.announcements !== undefined && !(Array.isArray(w.announcements) && w.announcements.every((x) => typeof x === 'string'))) no(`예배 기록 ${k}의 광고`);
+    if (w.wc !== undefined && w.wc !== null && !isObj(w.wc)) no(`예배 기록 ${k}의 예배송출 연결`);
+  });
+  coll('members', '성도', (m, k) => { if (typeof m.name !== 'string') no(`성도 ${k}의 이름`); });
+  coll('visits', '심방', (v, k) => { if (!Array.isArray(v.memberIds)) no(`심방 ${k}의 대상`); });
+  if (db.attendance !== undefined && db.attendance !== null) {
+    if (!isObj(db.attendance)) no('출석 묶음');
+    for (const [d, ids] of Object.entries(db.attendance)) if (!DAY.test(d) || !Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) no(`출석 ${d}`);
+  }
+  if (db.finance !== undefined && db.finance !== null) {
+    if (!isObj(db.finance)) no('재정 묶음');
+    if (db.finance.tx !== undefined) {
+      if (!isObj(db.finance.tx)) no('장부 묶음');
+      for (const [k, t] of Object.entries(db.finance.tx)) {
+        if (!isObj(t) || typeof t.date !== 'string' || !DAY.test(t.date) || !['income', 'expense'].includes(t.type) || typeof t.amount !== 'number' || !Number.isFinite(t.amount)) no(`장부 기록 ${k}`);
+      }
+    }
+  }
+  for (const [key, label] of [['minutes', '회의록'], ['events', '일정'], ['certs', '증명서']]) coll(key, label);
 }
 const counts = (db) => ({ church: db.church?.name || '', weeks: Object.keys(db.weeks || {}).length, members: Object.keys(db.members || {}).length, tx: Object.keys(db.finance?.tx || {}).length, minutes: Object.keys(db.minutes || {}).length });
 
@@ -190,6 +233,36 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
       res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="church-allinone-backup-${localDay()}${suffix}.zip"; filename*=UTF-8''${encodeURIComponent(`라온교회올인원-백업-${localDay()}${n > 1 ? `-${i + 1}부(전체${n}부)` : ''}.zip`)}` });
       await streamZip(res, entries);
     },
+    /**
+     * 복원 확인: 가장 최근 백업(바깥 백업 폴더가 있으면 그쪽, 없으면 이 컴퓨터 안)을 실제로 읽어 되살릴 수 있는 모양인지 보고,
+     * 성도 수·예배 수·장부 건수와 합계·회의록 수·녹음을 지금 자료와 견준다. 아무것도 바꾸지 않는다.
+     */
+    verify() {
+      const pick = (dir, re) => { try { return fs.readdirSync(dir).filter((f) => re.test(f)).map((f) => path.join(dir, f)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || ''; } catch { return ''; } };
+      const extDir = st.dir ? path.join(st.dir, FOLDER) : '';
+      const file = (extDir && pick(extDir, EXTERNAL_RE)) || pick(localDir, /^real-\d{4}-\d{2}-\d{2}\.json$/);
+      if (!file) return { ok: false, error: '아직 백업이 없습니다. 바깥 백업 폴더를 정하거나 [지금 백업]을 눌러 주세요.' };
+      let obj;
+      try { obj = readBackup(file); } catch (e) { return { ok: false, file, error: e.message }; }
+      const sum = (db) => Object.values(db.finance?.tx || {}).reduce((a, t) => a + (t.type === 'income' ? t.amount : -t.amount), 0);
+      const now = store.db, at = fs.statSync(file).mtimeMs;
+      const row = (label, b, n) => ({ label, backup: b, now: n, same: b === n });
+      const rows = [
+        row('교회 이름', obj.church?.name || '', now.church?.name || ''),
+        row('성도', Object.keys(obj.members || {}).length, Object.keys(now.members || {}).length),
+        row('예배 기록', Object.keys(obj.weeks || {}).length, Object.keys(now.weeks || {}).length),
+        row('장부 건수', Object.keys(obj.finance?.tx || {}).length, Object.keys(now.finance?.tx || {}).length),
+        row('장부 수입−지출 합계', sum(obj), sum(now)),
+        row('회의록', Object.keys(obj.minutes || {}).length, Object.keys(now.minutes || {}).length),
+      ];
+      // 녹음: 바깥 백업 폴더에 지금 녹음이 모두 같은 크기로 들어 있는지
+      if (extDir) {
+        const mine = recFiles(), missing = mine.filter((f) => { try { return fs.statSync(path.join(extDir, 'recordings', f)).size !== fs.statSync(path.join(recDir, f)).size; } catch { return true; } });
+        rows.push(row('녹음 (바깥 백업에 들어 있음)', mine.length - missing.length, mine.length));
+      }
+      const changedAfter = rows.some((r) => !r.same) && changedAt() > at;
+      return { ok: true, file, where: extDir && file.startsWith(extDir) ? 'external' : 'local', at, rows, allSame: rows.every((r) => r.same), changedAfter };
+    },
     async restoreLocal(file) {
       const f = path.basename(String(file || ''));
       if (!LOCAL_RE.test(f) || !fs.existsSync(path.join(localDir, f))) throw bad('그 백업 파일을 찾을 수 없습니다.', 404);
@@ -232,8 +305,22 @@ export function makeBackups({ dataDir, store, isBusy = () => '', againMs = AGAIN
           // 나눠 받은 백업의 2부부터는 녹음만 들어 있다: 교회 자료는 그대로 두고 녹음만 더한다
           const r = hasData ? await restoreObj(checkRestore(JSON.parse(fs.readFileSync(path.join(tmp, 'real.json'), 'utf8'))), name) : { ok: true, recordingsOnly: true };
           let rec = 0;
-          if (fs.existsSync(src)) { fs.mkdirSync(recDir, { recursive: true }); for (const f of fs.readdirSync(src)) if (AUDIO.test(f) && !fs.existsSync(path.join(recDir, f))) { fs.copyFileSync(path.join(src, f), path.join(recDir, f)); rec++; } }
-          return { ...r, recordings: rec };
+          // 녹음도 백업한 때의 내용으로: 같은 이름인데 내용이 다르면 지금 파일은 recordings/real/before-restore-시각/ 에 옮겨 두고 백업본으로 바꾼다.
+          // (예전에는 같은 이름이 있으면 건너뛰어, 되살렸다고 나와도 바뀐 녹음이 그대로 남았다) 백업에 없는 녹음은 지우지 않는다
+          let replaced = 0; const keepDir = path.join(recDir, `before-restore-${Date.now()}`);
+          if (fs.existsSync(src)) {
+            fs.mkdirSync(recDir, { recursive: true });
+            for (const f of fs.readdirSync(src)) {
+              if (!AUDIO.test(f)) continue;
+              const from = path.join(src, f), to = path.join(recDir, f);
+              if (fs.existsSync(to)) {
+                if (sameFile(from, to)) continue;
+                fs.mkdirSync(keepDir, { recursive: true }); renameRetrySync(to, path.join(keepDir, f)); replaced++;
+              }
+              fs.copyFileSync(from, to); rec++;
+            }
+          }
+          return { ...r, recordings: rec, recordingsReplaced: replaced, recordingsKept: replaced ? path.basename(keepDir) : '' };
         } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
       }
       let obj;

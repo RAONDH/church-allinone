@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useApp } from '../App';
 import { api } from '../lib/api';
 
-export interface LockView { enabled: boolean; areas: string[]; idleMin: number; unlocked: boolean; resetFile: string }
+export interface LockView { enabled: boolean; areas: string[]; idleMin: number; idleMs?: number; unlocked: boolean; resetFile: string }
 const AREAS: [string, string][] = [['people', '성도'], ['finance', '재정'], ['admin', '행정']];
 interface LockCtx { lv: LockView | null; reload: () => Promise<void> }
 const LC = createContext<LockCtx>({ lv: null, reload: async () => {} });
@@ -16,6 +16,17 @@ export function LockProvider({ children }: { children: ReactNode }) {
   useEffect(() => { reload(); }, [reload]);
   // 자리를 비워 서버가 다시 잠갔으면(423) 잠금 화면으로
   useEffect(() => { const h = () => { reload(); }; window.addEventListener('allinone-locked', h); return () => window.removeEventListener('allinone-locked', h); }, [reload]);
+  // 풀려 있는 동안에는 서버에 잠금 상태를 자주 묻는다: 자리를 비워 서버가 다시 잠그면 화면에 남은 성도·재정 자료도 곧바로 가린다
+  // (잠금 화면으로 바뀌면서 그 화면이 불러 둔 자료도 함께 사라진다). 다른 창에 다녀왔을 때도 바로 확인한다
+  const watching = !!lv?.enabled && lv.unlocked;
+  const every = Math.max(1000, Math.min(15000, Math.floor((lv?.idleMs || 60000) / 2)));
+  useEffect(() => {
+    if (!watching) return;
+    const t = setInterval(() => { reload(); }, every);
+    const v = () => { if (document.visibilityState === 'visible') reload(); };
+    document.addEventListener('visibilitychange', v); window.addEventListener('focus', v);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', v); window.removeEventListener('focus', v); };
+  }, [watching, every, reload]);
   return <LC.Provider value={{ lv, reload }}>{children}</LC.Provider>;
 }
 
@@ -57,7 +68,7 @@ function LockScreen({ area }: { area: string }) {
   );
 }
 
-/** 위쪽 줄의 '잠그기' 단추 (잠금을 켰고 지금 풀려 있을 때) */
+/** 위쪽 메뉴의 '잠그기' 단추 (잠금을 켰고 지금 풀려 있을 때) */
 export function LockButton() {
   const { lv, reload } = useLock();
   if (!lv?.enabled || !lv.unlocked) return null;

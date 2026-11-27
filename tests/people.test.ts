@@ -80,6 +80,19 @@ describe('성도 명부', () => {
     expect(csv.startsWith('﻿이름,')).toBe(true);
     expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
   });
+  it('명부를 내보냈다가 다시 붙여 넣어도 상태(이명 등)·음력 윤달·여러 줄 메모가 그대로이고 가짜 성도가 생기지 않는다', () => {
+    const ms = {
+      a: M({ id: 'a', name: '김이명', status: 'moved', birth: '1960-04-05', lunar: true, lunarLeap: true, memo: '첫 줄\n둘째 줄, 쉼표 "따옴표"', createdAt: 1 } as any),
+      b: M({ id: 'b', name: '박별세', status: 'deceased', memo: '-빼기로 시작', createdAt: 2 }),
+      c: M({ id: 'c', name: '최쉼', status: 'inactive', createdAt: 3 }),
+    };
+    const back = parsePaste(membersCsv({ members: ms })).rows;
+    expect(back.map((r) => r.name)).toEqual(['김이명', '박별세', '최쉼']);   // 메모 둘째 줄이 성도로 들어가지 않음
+    const again = back.map((r) => cleanMember(r));
+    expect(again.map((m: any) => m.status)).toEqual(['moved', 'deceased', 'inactive']);
+    expect([again[0].lunar, again[0].lunarLeap, again[0].memo]).toEqual([true, true, '첫 줄\n둘째 줄, 쉼표 "따옴표"']);
+    expect(again[1].memo).toBe('-빼기로 시작');
+  });
   it('지난 주일', () => {
     expect(lastSunday('2026-11-14')).toBe('2026-11-08');
     expect(lastSunday('2026-11-15')).toBe('2026-11-15');

@@ -45,7 +45,8 @@ export function makeLock({ dataDir }) {
   const resetRequested = () => fs.existsSync(path.join(dataDir, RESET_FILE));
 
   const tokenOf = (req) => (String(req.headers.cookie || '').match(new RegExp(`(?:^|;\\s*)${COOKIE}=([a-f0-9]{48})`)) || [])[1] || '';
-  const idleMs = (lock) => Math.max(1, Math.min(240, lock?.idleMin || 10)) * 60e3;
+  // 점검(하네스)에서만 LOCK_IDLE_MS 로 다시 잠기는 시간을 짧게 바꿀 수 있다 (실제로는 설정한 분 단위)
+  const idleMs = (lock) => Number(process.env.LOCK_IDLE_MS) || Math.max(1, Math.min(240, lock?.idleMin || 10)) * 60e3;
   function alive(lock, req, touch = true) {
     const t = tokenOf(req), at = sessions.get(t);
     if (!t || !at || Date.now() - at > idleMs(lock)) { if (t) sessions.delete(t); return false; }
@@ -61,7 +62,7 @@ export function makeLock({ dataDir }) {
     },
     view(db, req) {
       const l = db.lock;
-      return { enabled: !!l?.hash, areas: l?.areas || [], idleMin: l?.idleMin || 10, unlocked: !!l?.hash && alive(l, req, false), resetFile: RESET_FILE };
+      return { enabled: !!l?.hash, areas: l?.areas || [], idleMin: l?.idleMin || 10, idleMs: idleMs(l), unlocked: !!l?.hash && alive(l, req, false), resetFile: RESET_FILE };
     },
     /** 이 구역이 지금 열려 있는지 (잠금이 없거나, 그 구역을 잠그지 않았거나, 풀린 쪽지가 있음) — 주보처럼 일부만 가릴 때 */
     isOpen(db, req, area) { const l = db.lock; return !l?.hash || !l.areas.includes(area) || alive(l, req, false); },

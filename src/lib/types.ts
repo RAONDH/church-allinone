@@ -56,8 +56,11 @@ export interface People { members: Member[]; visits: Visit[]; attendance: Record
 
 export type Fund = '일반재정' | '특별재정' | '지정재정';
 export interface Tx { id: string; date: string; type: 'income' | 'expense'; fund: Fund; category: string; name: string; memberId: string; amount: number; note: string; srcId?: string; createdAt: number; updatedAt: number }
-export interface FinanceSettings { categories: Record<'income' | 'expense', Record<Fund, string[]>>; receipt: { regNo: string; address: string; representative: string } }
-export interface Finance { settings: FinanceSettings; tx: Tx[]; budgets: Record<string, Record<string, number>> }
+export interface FinanceSettings { categories: Record<'income' | 'expense', Record<Fund, string[]>>; receipt: { regNo: string; address: string; representative: string }; receiptOverride?: Record<string, boolean> }
+/** 기부금 영수증 발급 대장: 한 번 발급한 번호는 바뀌지 않는다 */
+export interface ReceiptIssue { no: number; key: string; name: string; total: number; issuedAt: number; canceled?: boolean; history: { at: number; action: 'issue' | 'reissue' | 'cancel'; total: number }[] }
+export interface ReceiptBook { seq: number; items: Record<string, ReceiptIssue> }
+export interface Finance { settings: FinanceSettings; tx: Tx[]; budgets: Record<string, Record<string, number>>; receipts?: Record<string, ReceiptBook> }
 
 export interface ChurchEvent { id: string; date: string; endDate: string; time: string; title: string; kind: string; place: string; memo: string }
 export interface Minutes { id: string; date: string; meeting: string; title: string; place: string; attendees: string; content: string; decisions: string; todos?: string; transcript?: string; chair: string; recorder: string; audio?: { file: string; name: string; size: number; at: number }; stt?: { at: number; model: string; seconds: number }; recording?: { startedAt: number; seq: number; bytes: number; seconds?: number; at?: number }; ai?: { at: number; via: string }; createdAt: number; updatedAt: number }

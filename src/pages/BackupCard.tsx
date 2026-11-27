@@ -9,6 +9,7 @@ interface BackupView {
   local: { file: string; size: number; at: number }[];
   parts?: { files: number; bytes: number }[];
 }
+interface VerifyResult { ok: boolean; error?: string; file?: string; where?: 'external' | 'local'; at?: number; rows?: { label: string; backup: string | number; now: string | number; same: boolean }[]; allSame?: boolean; changedAfter?: boolean }
 export const kb = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1e3))}KB`);
 export const label = (f: string) => {
   const m = f.match(/^real-(\d{4})-(\d{2})-(\d{2})\.json$/);
@@ -22,6 +23,8 @@ export default function BackupCard() {
   const [dir, setDir] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [check, setCheck] = useState<VerifyResult | null>(null);
+  const verify = async () => { setBusy(true); try { setCheck(await api<VerifyResult>('/api/backup/verify', { method: 'POST' })); } catch (e: any) { setCheck({ ok: false, error: e.message }); } setBusy(false); };
   const load = useCallback(() => api<BackupView>('/api/backup').then((x) => { setV(x); setDir(x.dir); }).catch((e) => setMsg({ ok: false, text: e.message })), []);
   useEffect(() => { load(); }, [load]);
   const run = async (fn: () => Promise<string>) => {
@@ -39,10 +42,11 @@ export default function BackupCard() {
     if (r.result?.error) throw new Error(r.result.error);
     return `백업했습니다${r.result?.recordings ? ` (새 녹음 ${r.result.recordings}개 포함)` : ''}.`;
   });
-  const restoreDone = (r: { church: string; weeks: number; members: number; tx: number; recordingsOnly?: boolean; recordings?: number }) => {
-    if (r.recordingsOnly) return `녹음 파일 ${r.recordings || 0}개를 더했습니다 (나눠 받은 백업의 녹음 묶음이라 교회 자료는 그대로 둡니다).`;
+  const restoreDone = (r: { church: string; weeks: number; members: number; tx: number; recordingsOnly?: boolean; recordings?: number; recordingsReplaced?: number }) => {
+    const rep = r.recordingsReplaced ? ` 녹음 ${r.recordingsReplaced}개는 백업한 때의 내용으로 바꾸고, 바뀌어 있던 것은 녹음 폴더의 before-restore 폴더에 남겨 두었습니다.` : '';
+    if (r.recordingsOnly) return `녹음 파일 ${r.recordings || 0}개를 더했습니다 (나눠 받은 백업의 녹음 묶음이라 교회 자료는 그대로 둡니다).${rep}`;
     setTimeout(() => window.location.reload(), 1500);
-    return `되살렸습니다: ${r.church || '(교회 이름 없음)'} · 예배 ${r.weeks} · 성도 ${r.members} · 장부 ${r.tx}건. 바로 앞 자료는 '되살리기 직전 자료'로 남겨 두었습니다. 화면을 새로 고칩니다…`;
+    return `되살렸습니다: ${r.church || '(교회 이름 없음)'} · 예배 ${r.weeks} · 성도 ${r.members} · 장부 ${r.tx}건. 바로 앞 자료는 '되살리기 직전 자료'로 남겨 두었습니다.${rep} 화면을 새로 고칩니다…`;
   };
   const restoreLocal = (f: string) => {
     if (!confirm(`${label(f)}로 되살릴까요?\n지금 자료는 '되살리기 직전 자료'로 따로 남겨 두니, 마음이 바뀌면 그것으로 다시 되살릴 수 있습니다.`)) return;
@@ -91,6 +95,16 @@ export default function BackupCard() {
       ) : (
         <p className="small"><a className="btn" href="/api/backup/download">백업 파일 받기 (.zip)</a> <span className="muted">교회 자료{v?.recordings ? `와 회의 녹음 ${v.recordings}개` : ''}를 파일 하나로 받습니다. 다른 컴퓨터로 옮길 때도 씁니다.</span></p>
       )}
+
+      <h3>복원 확인</h3>
+      <p className="small"><button disabled={busy} onClick={verify}>가장 최근 백업 확인하기</button> <span className="muted">백업 파일을 실제로 열어 되살릴 수 있는지 보고, 성도·예배·장부·회의록·녹음을 지금 자료와 견줍니다. 아무것도 바꾸지 않습니다.</span></p>
+      {check && (check.ok ? (
+        <div className={`small backup-verify ${check.allSame ? 'alert info' : 'alert warn'}`}>
+          <p>{check.allSame ? '✅ 가장 최근 백업으로 지금 자료를 그대로 되살릴 수 있습니다.' : check.changedAfter ? '🕘 백업한 뒤에 바뀐 자료가 있습니다. 다음 백업 때 함께 들어갑니다.' : '⚠️ 백업과 지금 자료가 다릅니다. 아래 표를 확인해 주세요.'} <span className="muted">({check.where === 'external' ? '바깥 백업' : '이 컴퓨터 백업'} · {check.at ? fmtTime(check.at) : ''})</span></p>
+          <table className="people-table"><thead><tr><th>항목</th><th className="num">백업</th><th className="num">지금</th><th /></tr></thead>
+            <tbody>{check.rows!.map((r) => <tr key={r.label}><td>{r.label}</td><td className="num">{typeof r.backup === 'number' ? r.backup.toLocaleString('ko-KR') : r.backup}</td><td className="num">{typeof r.now === 'number' ? r.now.toLocaleString('ko-KR') : r.now}</td><td>{r.same ? '같음' : '다름'}</td></tr>)}</tbody></table>
+        </div>
+      ) : <p className="alert err small">복원 확인 실패: {check.error}</p>)}
 
       <h3>되살리기</h3>
       <label className="btn small backup-file">받아 둔 백업 파일(.zip·.json)에서 되살리기<input type="file" hidden accept=".zip,.json" onChange={(e) => { const f = e.target.files?.[0]; if (f) restoreFile(f); e.target.value = ''; }} /></label>

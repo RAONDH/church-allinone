@@ -104,6 +104,49 @@ describe('백업', () => {
     expect(fs.readdirSync(rec).sort()).toEqual(['a.wav', 'b.wav', 'c.wav']);
     expect(s.db.church.name).toBe('원래교회');   // 녹음 묶음은 교회 자료를 건드리지 않음
   });
+  it('되살리기: 모양이 틀린 백업(예배 기록이 글자, 광고가 배열이 아님, 장부 금액이 글자)은 받지 않고 지금 자료를 그대로 둔다', async () => {
+    const d = T();
+    const s = openStore(d, 'real'); s.db.church = { name: '지금교회' }; s.db.weeks = {}; await s.save();
+    const b = makeBackups({ dataDir: d, store: s });
+    const bads = [
+      { church: { name: 'x' }, weeks: { w1: '글자' } },
+      { church: { name: 'x' }, weeks: { w1: { id: 'w1', date: '2026-01-04', announcements: '한 줄' } } },
+      { church: { name: 'x' }, weeks: {}, finance: { tx: { t1: { date: '2026-01-04', type: 'income', amount: '1000' } } } },
+      { church: { name: 'x' }, weeks: [] },
+    ];
+    for (const x of bads) await expect(b.restoreUpload(Buffer.from(JSON.stringify(x)), 'x.json')).rejects.toThrow(/모양이 맞지 않아|백업 파일이 아닙니다/);
+    expect(s.db.church.name).toBe('지금교회');
+    expect(() => checkRestore({ church: { name: 'ok' }, weeks: { w1: { id: 'w1', date: '2026-01-04', announcements: ['광고'] } }, members: { m: { name: '홍' } } })).not.toThrow();
+  });
+  it('되살리기: 백업한 뒤 바뀐 녹음은 백업한 때의 내용으로 돌리고, 바뀌어 있던 것은 따로 남긴다 (백업에 없는 녹음은 지우지 않음)', async () => {
+    const d = T();
+    const s = openStore(d, 'real'); s.db.church = { name: '교회' }; s.db.weeks = {}; await s.save();
+    const rec = path.join(d, 'recordings', 'real'); fs.mkdirSync(rec, { recursive: true });
+    fs.writeFileSync(path.join(rec, 'm1.wav'), Buffer.alloc(100, 1));
+    const b = makeBackups({ dataDir: d, store: s });
+    const out = new PassThrough(), bufs: Buffer[] = []; out.on('data', (c) => bufs.push(c)); (out as any).writeHead = () => {};
+    await b.download(out); const zip = Buffer.concat(bufs);
+    fs.writeFileSync(path.join(rec, 'm1.wav'), Buffer.alloc(120, 9));   // 백업 뒤 녹음이 바뀜
+    fs.writeFileSync(path.join(rec, 'm2.wav'), Buffer.alloc(10, 2));    // 백업 뒤 새 녹음
+    const r = await b.restoreUpload(zip, 'b.zip');
+    expect([r.recordings, r.recordingsReplaced]).toEqual([1, 1]);
+    expect(fs.readFileSync(path.join(rec, 'm1.wav'))).toEqual(Buffer.alloc(100, 1));
+    expect(fs.readFileSync(path.join(rec, r.recordingsKept, 'm1.wav'))).toEqual(Buffer.alloc(120, 9));
+    expect(fs.existsSync(path.join(rec, 'm2.wav'))).toBe(true);
+  });
+  it('복원 확인: 가장 최근 백업을 실제로 읽어 지금 자료와 견주고, 아무것도 바꾸지 않는다', async () => {
+    const d = T(), ext = T();
+    const s = openStore(d, 'real'); s.db.church = { name: '확인교회' }; s.db.weeks = {}; s.db.members = { a: { id: 'a', name: '홍' } }; await s.save();
+    const b = makeBackups({ dataDir: d, store: s });
+    expect(b.verify().ok).toBe(false);   // 아직 백업 없음
+    await b.setDir(ext);
+    const v = b.verify();
+    expect([v.ok, v.where, v.allSame]).toEqual([true, 'external', true]);
+    s.db.members.b = { id: 'b', name: '김' }; await s.save();
+    const v2 = b.verify();
+    expect(v2.allSame).toBe(false);
+    expect(v2.rows.find((r: any) => r.label === '성도')).toMatchObject({ backup: 1, now: 2, same: false });
+  });
   it('되살리기: 올인원 자료가 아닌 파일, 작업 중일 때는 거절', async () => {
     const d = T();
     const s = openStore(d, 'real'); await s.save();

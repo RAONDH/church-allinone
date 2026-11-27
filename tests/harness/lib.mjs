@@ -33,7 +33,9 @@ export function has(text, part, what) {
 export async function runChecks(title, list) {
   console.log(`\n▶ ${title}`);
   const results = [];
-  for (const [name, fn] of list) {
+  // 고치는 중에만: CHECK_ONLY=글자 로 이름에 그 글자가 든 점검만 돌린다 (전체 점검 npm run verify 에서는 쓰지 않음)
+  const only = process.env.CHECK_ONLY;
+  for (const [name, fn] of only ? list.filter(([n]) => n.includes(only)) : list) {
     const t0 = Date.now();
     try { await fn(); results.push({ name, ok: true }); console.log(`  ✓ ${name} (${Date.now() - t0}ms)`); }
     catch (e) { results.push({ name, ok: false, error: e.message }); console.log(`  ✗ ${name}\n      ${String(e.message).split('\n').join('\n      ')}`); }

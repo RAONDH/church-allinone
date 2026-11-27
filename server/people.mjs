@@ -7,6 +7,7 @@ const localDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() +
 const str = (v, n = 200) => String(v ?? '').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, n);
 const oneOf = (list, v, d = '') => (list.includes(v) ? v : d);
 export const STATUSES = ['active', 'inactive', 'absent', 'moved', 'deceased', 'other'];
+const STATUS_FROM_LABEL = { 재적: 'active', '쉬는 중': 'inactive', 쉬는중: 'inactive', 휴면: 'inactive', 비출석: 'absent', 이명: 'moved', 별세: 'deceased', 소천: 'deceased', 기타: 'other' };
 export const BAPTISMS = ['', '학습', '세례', '유아세례', '입교'];
 export const VISIT_KINDS = ['심방', '전화', '병원', '새가족', '상담', '기타'];
 
@@ -38,7 +39,8 @@ const FIELDS = {
   baptismDate: (v) => normDate(v),
   baptismPlace: (v) => str(v, 60).trim(),
   baptismBy: (v) => str(v, 30).trim(),
-  status: (v) => oneOf(STATUSES, v, 'active'),
+  // 명부 파일에서 다시 넣을 때는 '이명'·'별세' 같은 말로 와도 알아듣는다 (내보내기·가져오기 왕복)
+  status: (v) => oneOf(STATUSES, v, '') || STATUS_FROM_LABEL[String(v ?? '').trim()] || 'active',
   relation: (v) => str(v, 20).trim(),
   memo: (v) => str(v, 3000),
 };
@@ -48,6 +50,28 @@ export function cleanMember(b, { partial = false } = {}) {
   return out;
 }
 export const emptyMember = () => ({ ...cleanMember({}), familyId: '' });
+
+export const FIELD_LABEL = { name: '이름', gender: '성별', birth: '생일', lunar: '음력', lunarLeap: '윤달', phone: '전화', address: '주소', role: '직분', group: '구역', baptism: '세례', registeredAt: '등록일', baptismDate: '세례일', baptismPlace: '세례 교회', baptismBy: '집례자', status: '상태', relation: '가족 관계', memo: '메모' };
+/** 고친 칸 가운데, 다른 창이 먼저 다른 값으로 바꾼 칸 (_base 가 없으면 예전 방식으로 그대로 저장) */
+export function memberConflicts(m, patch, base) {
+  if (!base || typeof base !== 'object') return [];
+  const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+  const out = [];
+  for (const k of Object.keys(patch)) {
+    if (!Object.prototype.hasOwnProperty.call(base, k) || !FIELDS[k]) continue;
+    const was = FIELDS[k](base[k]);
+    if (!same(m[k], was) && !same(m[k], patch[k])) out.push({ field: k, label: FIELD_LABEL[k] || k, current: m[k] });
+  }
+  return out;
+}
+
+/** 출석 합치기: 이 창이 처음 본 명단(base)에서 더하고 뺀 것만 지금 명단에 반영한다 (다른 창이 그사이 체크한 분을 지우지 않게) */
+export function mergeAttendance(current, base, next) {
+  if (!Array.isArray(base)) return next;
+  const b = new Set(base), n = new Set(next);
+  const added = next.filter((id) => !b.has(id)), removed = new Set(base.filter((id) => !n.has(id)));
+  return [...new Set([...(current || []).filter((id) => !removed.has(id)), ...added])];
+}
 
 /** 그 번호의 성도가 있는지 ('__proto__'·'constructor' 같은 이름이 성도로 통과하지 않게 자기 칸만 본다) */
 export const hasMember = (db, id) => typeof id === 'string' && !!db.members && Object.prototype.hasOwnProperty.call(db.members, id);
@@ -70,7 +94,7 @@ function joinFamily(db, m, withId) {
   m.familyId = other.familyId;
 }
 
-const CSV_COLS = [['name', '이름'], ['gender', '성별'], ['birth', '생일'], ['lunar', '음력'], ['phone', '전화'], ['address', '주소'], ['role', '직분'], ['group', '구역'], ['baptism', '세례'], ['registeredAt', '등록일'], ['status', '상태'], ['family', '가족'], ['relation', '관계'], ['memo', '메모']];
+const CSV_COLS = [['name', '이름'], ['gender', '성별'], ['birth', '생일'], ['lunar', '음력'], ['lunarLeap', '윤달'], ['phone', '전화'], ['address', '주소'], ['role', '직분'], ['group', '구역'], ['baptism', '세례'], ['registeredAt', '등록일'], ['status', '상태'], ['family', '가족'], ['relation', '관계'], ['memo', '메모']];
 const STATUS_LABEL = { active: '재적', inactive: '쉬는 중', absent: '비출석', moved: '이명', deceased: '별세', other: '기타' };
 const csvCell = (v) => {
   let s = String(v ?? '');
@@ -82,7 +106,7 @@ export function membersCsv(db) {
   // 가족은 가족 중 가장 먼저 등록된 분 이름으로 표시 (다시 붙여 넣을 때 같은 이름끼리 묶임)
   const head = {};
   for (const m of [...ms].sort((a, b) => a.createdAt - b.createdAt)) if (m.familyId && !head[m.familyId]) head[m.familyId] = m.name;
-  const rows = ms.map((m) => CSV_COLS.map(([k]) => (k === 'family' ? (m.familyId ? head[m.familyId] : '') : k === 'lunar' ? (m.lunar ? '음력' : '') : k === 'status' ? STATUS_LABEL[m.status] : m[k])));
+  const rows = ms.map((m) => CSV_COLS.map(([k]) => (k === 'family' ? (m.familyId ? head[m.familyId] : '') : k === 'lunar' ? (m.lunar ? '음력' : '') : k === 'lunarLeap' ? (m.lunar && m.lunarLeap ? '윤달' : '') : k === 'status' ? STATUS_LABEL[m.status] : m[k])));
   return '﻿' + [CSV_COLS.map((c) => c[1]), ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -138,6 +162,9 @@ export async function peopleApi({ sub, req, res, db, save, body, send, HttpError
       const b = await body(req);
       const patch = cleanMember(b, { partial: true });
       if (patch.name === '') throw new HttpError(400, '이름은 비워 둘 수 없습니다.');
+      // 두 창 충돌: 고친 칸의 처음 값(_base)을 받았으면, 그사이 다른 창이 그 칸을 다르게 바꿨는지 본다 (먼저 저장한 내용을 덮어쓰지 않게)
+      const conflicts = memberConflicts(m, patch, b._base);
+      if (conflicts.length) { send(res, 409, { error: `다른 창에서 이 성도의 ${conflicts.map((c) => c.label).join('·')}을(를) 먼저 바꿨습니다. 최신 내용을 확인한 뒤 다시 고쳐 주세요.`, conflicts }); return true; }
       Object.assign(m, patch, { updatedAt: Date.now() });
       joinFamily(db, m, b.familyWith);
       await save();
@@ -193,7 +220,8 @@ export async function peopleApi({ sub, req, res, db, save, body, send, HttpError
   if ((q = s(/^\/attendance\/(\d{4}-\d{2}-\d{2})$/)) && req.method === 'PUT') {
     if (!normDate(q[1])) throw new HttpError(400, '날짜가 올바르지 않습니다.');
     const b = await body(req);
-    const ids = [...new Set((Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => hasMember(db, id)))];
+    const next = [...new Set((Array.isArray(b.memberIds) ? b.memberIds : []).filter((id) => hasMember(db, id)))];
+    const ids = mergeAttendance(db.attendance[q[1]], Array.isArray(b._base) ? b._base.filter((id) => typeof id === 'string') : null, next).filter((id) => hasMember(db, id));
     if (ids.length) db.attendance[q[1]] = ids; else delete db.attendance[q[1]];
     await save();
     send(res, 200, { date: q[1], memberIds: ids });

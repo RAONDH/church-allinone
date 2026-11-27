@@ -5,7 +5,7 @@ import path from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import puppeteer from 'puppeteer-core';
 import { PRINT_ROOM_MM, PAD, GAP, FONT } from '../../server/bulletin.mjs';
-import { startHub, runChecks, eq, ok, has, fakeServer, fakeMusicSheet, json, tmpDir, sleep, HUB } from './lib.mjs';
+import { startHub, runChecks, eq, ok, has, expectStatus, fakeServer, fakeMusicSheet, json, tmpDir, sleep, HUB } from './lib.mjs';
 
 export function findChrome() {
   const c = [process.env.CHROME_PATH, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium',
@@ -265,6 +265,28 @@ export async function runUi() {
         if (t) await hub.del(`/api/ws/sample/finance/tx/${t.id}`);
         noErrors('재정 입력 보관');
       }],
+      ['재정(예제): 같은 이름 성도가 두 분이면 수입 입력에서 어느 분인지 고르게 하고, 고른 분과 이어 저장하며, 영수증 탭에 발급 번호 칸이 있다', async () => {
+        const a = (await hub.post('/api/ws/sample/members', { name: '동명시험성도', group: '1구역' })).data.member;
+        const b = (await hub.post('/api/ws/sample/members', { name: '동명시험성도', group: '2구역' })).data.member;
+        try {
+          await go('/finance?ws=sample');
+          await clickText('수입·지출 입력');
+          const name = await page.$('input.entry-name'), amt = await page.$('.entry-table input.num');
+          await name.type('동명시험성도');
+          const sel = await page.waitForSelector('select.which-member');
+          await sel.select(b.id);
+          await amt.type('7000');
+          await clickText('장부에 넣기');
+          await waitText('넣었습니다');
+          const t = (await hub.get('/api/ws/sample/finance')).data.tx.find((x) => x.name === '동명시험성도');
+          eq(t?.memberId, b.id, '고른 분(2구역)과 이어진 기록');
+          if (t) await hub.del(`/api/ws/sample/finance/tx/${t.id}`);
+          await page.evaluate(() => { for (const k of Object.keys(localStorage)) if (k.startsWith('fin-entry-draft:')) localStorage.setItem(k, '[]'); });
+          await go('/finance/receipts?ws=sample');
+          await waitText('발급 번호');
+        } finally { await hub.del(`/api/ws/sample/members/${a.id}`); await hub.del(`/api/ws/sample/members/${b.id}`); }
+        noErrors('동명이인 고르기');
+      }],
       ['행정(예제): 일정 추가 창으로 넣으면 달력에 보인다', async () => {
         await go('/admin?ws=sample');
         await clickText('일정 추가');
@@ -303,6 +325,10 @@ export async function runUi() {
           ok(fs.existsSync(path.join(ext, '라온교회올인원-백업')), '바깥 폴더에 백업 폴더가 생겨야 함');
           await waitText('이 컴퓨터 안의 백업');
           ok(await page.$('a[href="/api/backup/download"]'), '백업 파일 받기 단추');
+          // 복원 확인: 방금 만든 바깥 백업을 실제로 열어 지금 자료와 견준다
+          await clickText('가장 최근 백업 확인하기');
+          await waitText('지금 자료를 그대로 되살릴 수 있습니다');
+          has(await page.evaluate(() => document.querySelector('.backup-verify')?.innerText || ''), '바깥 백업', '바깥 백업을 확인했다고 표시');
           await clickText('끄기'); await waitText('바깥 백업을 껐습니다');
           noErrors('백업 설정');
         } finally { fs.rmSync(ext, { recursive: true, force: true }); }
@@ -1032,6 +1058,32 @@ export async function runUi() {
         const list = await page.evaluate(() => document.querySelector('ol.setlist')?.innerText || '');
         ok(list.indexOf('화면시험 새 노래') >= 0 && list.indexOf('화면시험 새 노래') < list.indexOf('은혜의 강'), '이번 주 찬양에 music sheet 순서대로', list.slice(0, 200));
         noErrors('music sheet 가져오기');
+      }],
+      ['잠금: 성도만 잠그면 재정·행정은 열리고 성도 정보만 가려졌다고 알려 주며, 풀어 둔 성도 명부도 자리를 비워 다시 잠기면 화면에서 곧바로 가려진다', async () => {
+        // 다시 잠기는 시간을 2.5초로 줄인 시험 서버 (실제로는 설정한 분 단위)
+        const h2 = await startHub({ name: 'ui-lock', env: { LOCK_IDLE_MS: '2500' } });
+        const p2 = await browser.newPage();
+        const errs = [];
+        p2.on('pageerror', (e) => errs.push(String(e.message)));
+        try {
+          await h2.put('/api/ws/real/church', { name: '잠금시험교회', pastor: '시험 목사' });
+          await h2.post('/api/ws/real/members', { name: '잠금시험성도' });
+          expectStatus(await h2.put('/api/ws/real/lock', { pin: '1234', areas: ['people'], idleMin: 1 }), 200, '성도만 잠그기');
+          // 재정·행정: 잠금 화면이 아니라 화면이 열리고, 성도 정보만 가려졌다고 알린다
+          for (const [p, title] of [['/finance', '재정'], ['/admin', '행정']]) {
+            await p2.goto(`${h2.base}${p}?ws=real`, { waitUntil: 'networkidle0' });
+            await p2.waitForFunction(() => /성도 정보가 잠겨 있어/.test(document.body.innerText), { timeout: 8000 }).catch(() => { throw new Error(`${title}: 성도만 잠갔는데 안내가 나오지 않았습니다`); });
+            ok(!(await p2.$('input[aria-label="잠금 암호"]')), `${title} 화면이 잠금 화면으로 막히면 안 됨`);
+          }
+          // 성도: 잠금 화면 → 풀면 명부가 보임 → 손대지 않고 기다리면 화면도 잠금 화면으로
+          await p2.goto(`${h2.base}/people?ws=real`, { waitUntil: 'networkidle0' });
+          await p2.waitForSelector('input[aria-label="잠금 암호"]');
+          await p2.type('input[aria-label="잠금 암호"]', '1234'); await p2.keyboard.press('Enter');
+          await p2.waitForFunction(() => document.body.innerText.includes('잠금시험성도'), { timeout: 8000 });
+          await p2.waitForFunction(() => !!document.querySelector('input[aria-label="잠금 암호"]') && !document.body.innerText.includes('잠금시험성도'), { timeout: 8000, polling: 200 })
+            .catch(() => { throw new Error('다시 잠긴 뒤에도 화면에 성도 이름이 남아 있습니다'); });
+          eq(errs, [], '화면 오류');
+        } finally { await p2.close(); await h2.stop(); }
       }],
       ['자료 손상 복구: 우리 교회 자료 파일이 깨졌으면 처음 설정 대신 복구 화면이 나오고, 백업을 골라 되살리면 자료가 열린다', async () => {
         const h2 = await startHub({ name: 'ui-broken', prepare: (d) => {

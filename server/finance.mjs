@@ -105,7 +105,7 @@ export async function financeApi({ sub, req, res, url, db, save, body, send, Htt
   const wrap = (fn) => { try { return fn(); } catch (e) { throw e.code === 400 ? new HttpError(400, e.message) : e; } };
 
   if (sub === '/finance' && req.method === 'GET') {
-    send(res, 200, { settings: f.settings, tx: Object.values(f.tx), budgets: f.budgets });
+    send(res, 200, { settings: f.settings, tx: Object.values(f.tx), budgets: f.budgets, receipts: f.receipts || {} });
     return true;
   }
   if (sub === '/finance/export.csv' && req.method === 'GET') {
@@ -155,6 +155,12 @@ export async function financeApi({ sub, req, res, url, db, save, body, send, Htt
         c[type][fund] = [...new Set((b.categories?.[type]?.[fund] || []).map((x) => str(x, 40).trim()).filter(Boolean))].slice(0, 80);
       }
       f.settings.categories = c;
+    }
+    // 항목마다 기부금 영수증 대상인지 (정해 두지 않은 항목은 이름으로 정한 기본값을 따름)
+    if (b.receiptOverride && typeof b.receiptOverride === 'object') {
+      const o = {};
+      for (const [k, v] of Object.entries(b.receiptOverride).slice(0, 300)) if (k !== '__proto__' && str(k, 40).trim()) o[str(k, 40).trim()] = !!v;
+      f.settings.receiptOverride = o;
     }
     if (b.receipt) f.settings.receipt = { regNo: str(b.receipt.regNo, 30).trim(), address: str(b.receipt.address, 200).trim(), representative: str(b.receipt.representative, 40).trim() };
     await save();
@@ -211,6 +217,28 @@ export async function financeApi({ sub, req, res, url, db, save, body, send, Htt
     const r = importLedger(db, b);
     await save();
     send(res, 200, r);
+    return true;
+  }
+  // 기부금 영수증 발급 대장: 발급한 순서대로 번호를 주고 그 번호는 바꾸지 않는다 (헌금자가 늘어도 이미 준 번호가 밀리지 않게).
+  // 같은 분을 다시 발급하면 같은 번호로, 그때 금액을 기록한다. 취소하면 번호는 비워 두고 다시 쓰지 않는다.
+  if ((q = s(/^\/finance\/receipts\/(\d{4})$/)) && req.method === 'POST') {
+    const b = await body(req);
+    const key = str(b.key, 80);
+    if (!/^(m:[a-z0-9]{1,40}|n:.{1,60})$/.test(key)) throw new HttpError(400, '영수증을 발급할 헌금자를 알 수 없습니다. (같은 이름이 둘 이상인 기록은 먼저 어느 분인지 정해 주세요)');
+    const book = ((f.receipts ??= {})[q[1]] ??= { seq: 0, items: {} });
+    const now = Date.now(), total = Math.max(0, Math.round(+b.total || 0));
+    let it = Object.prototype.hasOwnProperty.call(book.items, key) ? book.items[key] : null;
+    if (b.action === 'cancel') {
+      if (!it || it.canceled) throw new HttpError(404, '발급한 영수증이 없습니다.');
+      it.canceled = true; it.history.push({ at: now, action: 'cancel', total: it.total });
+    } else {
+      if (!total) throw new HttpError(400, '금액이 0원인 영수증은 발급하지 않습니다.');
+      if (it && !it.canceled) { it.history.push({ at: now, action: 'reissue', total }); Object.assign(it, { total, name: str(b.name, 60), issuedAt: now }); }
+      else { it = { no: ++book.seq, key, name: str(b.name, 60), total, issuedAt: now, history: [{ at: now, action: 'issue', total }] }; book.items[key] = it; }
+      if (it.history.length > 50) it.history = it.history.slice(-50);
+    }
+    await save();
+    send(res, 200, { item: it, book });
     return true;
   }
   // 이름만 적힌 헌금 기록을 명부의 성도와 다시 맞춰 보기 (명부에 성도를 넣은 뒤)

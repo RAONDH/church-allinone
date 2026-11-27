@@ -195,6 +195,7 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
   const recDir = path.join(dataDir, 'recordings', ws);
   const audioFile = (m) => (m?.audio?.file ? path.join(recDir, path.basename(m.audio.file)) : '');
   if ((q = s(/^\/minutes\/([a-f0-9]+)$/)) && req.method === 'DELETE' && db.minutes[q[1]]) {
+    mJobs.delete(`${ws}:${q[1]}`);   // 녹취·AI 정리 중에 지워도 진행 중 표시가 남지 않게
     const f = audioFile(db.minutes[q[1]]); if (f) fs.rmSync(f, { force: true });   // 회의록을 지우면 녹음 파일도 함께
     fs.rmSync(path.join(recDir, `${q[1]}.rec.pcm`), { force: true });   // 녹음 중이던 조각도
   }
@@ -379,6 +380,9 @@ export async function adminApi({ sub, req, res, db, save, body, send, HttpError,
       } catch (e) {
         console.error('회의록 작성기 실패:', e.message);
         Object.assign(job, { error: e.message || '처리하지 못했습니다.' });
+      } finally {
+        // 끝났거나, 그사이 회의록이 지워졌으면 진행 중 표시를 반드시 치운다 (남아 있으면 업데이트를 계속 막는다). 실패는 안내하려고 남김
+        if (!job.error && mJobs.get(key) === job) mJobs.delete(key);
       }
     })();
     send(res, 200, { job });

@@ -19,3 +19,9 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   if (!r.ok) throw new ApiError(r.status, j.error || `요청을 처리하지 못했습니다 (${r.status})`, j);
   return j as T;
 }
+
+/** 성도 자료: 성도만 잠겨 있으면(423) 빈 명부로 돌려준다. 재정·행정처럼 잠기지 않은 화면은 그대로 쓰고, 성도 이름·주소만 가린다 */
+export async function peopleOrLocked<T extends { members: unknown[] }>(base: string, empty: T): Promise<T & { peopleLocked?: boolean }> {
+  try { return await api<T>(`${base}/people`); }
+  catch (e) { if (e instanceof ApiError && e.status === 423) return { ...empty, peopleLocked: true }; throw e; }
+}

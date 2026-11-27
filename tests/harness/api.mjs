@@ -231,6 +231,28 @@ export async function runApi() {
         await put(`${R}/attendance/${today}`, { memberIds: [] });
         eq((await get(`${R}/people`)).data.attendance[today] ?? null, null, '빈 날 기록');
       }],
+      ['두 창에서 성도·출석 고치기: 한 창이 먼저 저장한 칸을 다른 창이 옛 값으로 되돌리지 않고, 같은 칸을 둘 다 고치면 알려 주며, 출석은 두 창의 체크가 모두 남는다', async () => {
+        const a = expectStatus(await post(`${R}/members`, { name: '두창시험성도', phone: '010-1111-1111', address: '옛 주소' }), 200, '성도 만들기').member;
+        const b = expectStatus(await post(`${R}/members`, { name: '두창시험성도2' }), 200, '둘째 성도').member;
+        try {
+          // 두 창 모두 같은 옛 자료를 가지고 시작
+          expectStatus(await put(`${R}/members/${a.id}`, { phone: '010-2222-2222', _base: { phone: a.phone } }), 200, '첫 창: 전화');
+          expectStatus(await put(`${R}/members/${a.id}`, { address: '새 주소', _base: { address: a.address } }), 200, '둘째 창: 주소');
+          const m = (await get(`${R}/people`)).data.members.find((x) => x.id === a.id);
+          eq([m.phone, m.address], ['010-2222-2222', '새 주소'], '두 창에서 고친 칸이 모두 남음');
+          const c = await put(`${R}/members/${a.id}`, { phone: '010-3333-3333', _base: { phone: a.phone } });
+          eq([c.status, c.data.conflicts?.[0]?.field], [409, 'phone'], '같은 칸을 다른 창이 먼저 바꿨으면 알림');
+          eq((await get(`${R}/people`)).data.members.find((x) => x.id === a.id).phone, '010-2222-2222', '먼저 저장한 전화번호가 남음');
+          // 출석: 두 창이 빈 명단에서 각자 한 분씩 체크
+          const D = '2031-05-04';
+          await put(`${R}/attendance/${D}`, { memberIds: [a.id], _base: [] });
+          await put(`${R}/attendance/${D}`, { memberIds: [b.id], _base: [] });
+          eq([...(await get(`${R}/people`)).data.attendance[D]].sort(), [a.id, b.id].sort(), '두 창의 체크가 모두 남음');
+          await put(`${R}/attendance/${D}`, { memberIds: [b.id], _base: [a.id, b.id] });   // 한 창에서 한 분 빼기
+          eq((await get(`${R}/people`)).data.attendance[D], [b.id], '뺀 분만 빠짐');
+          await put(`${R}/attendance/${D}`, { memberIds: [] });
+        } finally { await del(`${R}/members/${a.id}`); await del(`${R}/members/${b.id}`); }
+      }],
       ['성도 명부 CSV: 한글이 깨지지 않게(BOM) 하고, = 로 시작하는 칸은 수식으로 실행되지 않게 막는다', async () => {
         await post(`${R}/members`, { name: '=HYPERLINK("x")' });
         const t = (await get(`${R}/people/export.csv`)).data;
@@ -251,6 +273,23 @@ export async function runApi() {
         eq((await get(`${R}/finance`)).data.tx.find((t) => t.id === id).amount, 7000, '고친 금액');
         await del(`${R}/finance/tx/${id}`);
         ok(!(await get(`${R}/finance`)).data.tx.some((t) => t.id === id), '지운 기록은 없어야 함');
+      }],
+      ['기부금 영수증 발급 대장: 발급한 순서로 번호를 주고, 헌금자가 늘어도 이미 준 번호는 그대로이며, 다시 발급은 같은 번호·취소한 번호는 다시 쓰지 않는다', async () => {
+        const Y = '2033', P = `${R}/finance/receipts/${Y}`;
+        const r1 = expectStatus(await post(P, { action: 'issue', key: 'n:하영수', name: '하영수', total: 1000 }), 200, '하영수 발급');
+        const r2 = expectStatus(await post(P, { action: 'issue', key: 'n:가나다', name: '가나다', total: 500 }), 200, '이름 순서가 앞인 분을 나중에 발급');
+        eq([r1.item.no, r2.item.no], [1, 2], '발급한 순서대로 번호');
+        const again = expectStatus(await post(P, { action: 'issue', key: 'n:하영수', name: '하영수', total: 1500 }), 200, '금액이 바뀐 뒤 다시 발급');
+        eq([again.item.no, again.item.total, again.item.history.map((h) => h.action)], [1, 1500, ['issue', 'reissue']], '같은 번호, 그때 금액, 발급 기록');
+        expectStatus(await post(P, { action: 'cancel', key: 'n:가나다' }), 200, '발급 취소');
+        const r3 = expectStatus(await post(P, { action: 'issue', key: 'n:다라마', name: '다라마', total: 300 }), 200, '새 분 발급');
+        eq(r3.item.no, 3, '취소한 번호(2)는 다시 쓰지 않음');
+        expectStatus(await post(P, { action: 'issue', key: 'dup:김영희', name: '김영희', total: 10 }), 400, '동명이인 확인 필요 묶음은 발급 거절');
+        eq(Object.keys((await get(`${R}/finance`)).data.receipts[Y].items).length, 3, '재정 자료에 발급 대장이 함께 옴');
+        // 영수증 대상 항목 설정
+        expectStatus(await put(`${R}/finance/settings`, { receiptOverride: { 기타수입: true, 건축헌금: false } }), 200, '영수증 대상 항목 저장');
+        eq((await get(`${R}/finance`)).data.settings.receiptOverride, { 기타수입: true, 건축헌금: false }, '저장된 영수증 대상 항목');
+        await put(`${R}/finance/settings`, { receiptOverride: {} });
       }],
       ['재정: 항목 추가·이름 바꾸기 (이미 적은 장부도 함께 바뀜)', async () => {
         await post(`${R}/finance/category`, { op: 'add', type: 'income', fund: '일반재정', name: '시험헌금' });
@@ -356,6 +395,15 @@ export async function runApi() {
           eq(r.status, 416, `맞지 않는 범위 ${bad}`); await r.arrayBuffer();
         }
         expectStatus(await get('/api/health'), 200, '그 뒤에도 서버가 살아 있음');
+      }],
+      ['회의록 AI 정리 중에 회의록을 지워도 진행 중 표시가 남지 않아 업데이트를 막지 않는다 (예제)', async () => {
+        const m = expectStatus(await post(`${S}/minutes`, { date: today, meeting: '당회', title: '지울 정리 시험', transcript: '정리할 녹취록 글입니다.' }), 200, '회의록 만들기').item;
+        expectStatus(await post(`${S}/minutes/${m.id}/summarize`, {}), 200, 'AI 정리 시작');
+        ok((await get('/api/update')).data.busy, '정리하는 동안은 바쁨으로 보여야 함');
+        expectStatus(await del(`${S}/minutes/${m.id}`), 200, '정리 중에 지우기');
+        await sleep(1800);   // 예제 정리(1.2초)가 끝날 때까지
+        eq((await get('/api/update')).data.busy, '', '지운 뒤 진행 중 작업이 남지 않음');
+        eq(Object.keys((await get(`${S}/stt`)).data.jobs || {}), [], '회의록 작업 목록도 비어 있음');
       }],
       ['회의록 지우기: 녹음하던 조각 파일도 함께 지운다', async () => {
         const m = (await post(`${R}/minutes`, { date: today, meeting: '당회', title: '지울 녹음' })).data.item;

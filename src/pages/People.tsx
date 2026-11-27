@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
@@ -152,9 +152,14 @@ function MemberDialog({ data, member, onClose, reload }: { data: PeopleData; mem
   const save = async () => {
     setBusy(true); setErr('');
     try {
-      const body = { ...f, familyWith: familyWith === '__none' ? '' : familyWith || undefined };
-      if (member) await api(`${base}/members/${member.id}`, { method: 'PUT', body });
-      else await api(`${base}/members`, { method: 'POST', body });
+      const fw = familyWith === '__none' ? '' : familyWith || undefined;
+      if (member) {
+        // 고친 칸만, 처음 본 값과 함께 보낸다 (다른 창에서 먼저 고친 다른 칸을 옛 값으로 되돌리지 않게)
+        const keys = (Object.keys(f) as (keyof typeof f)[]).filter((k) => !['id', 'createdAt', 'updatedAt', 'familyId'].includes(k as string) && JSON.stringify(f[k] ?? '') !== JSON.stringify((member as any)[k] ?? ''));
+        const body: any = { familyWith: fw, _base: Object.fromEntries(keys.map((k) => [k, (member as any)[k]])) };
+        for (const k of keys) body[k] = f[k];
+        await api(`${base}/members/${member.id}`, { method: 'PUT', body });
+      } else await api(`${base}/members`, { method: 'POST', body: { ...f, familyWith: fw } });
       await reload(); onClose();
     } catch (e: any) { setErr(e.message); setBusy(false); }
   };
@@ -398,7 +403,9 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
   const draftKey = (d: string) => `att-draft:${base}:${d}`;
   const readDraft = (d: string): string[] | null => { try { const x = JSON.parse(localStorage.getItem(draftKey(d)) || 'null'); return Array.isArray(x) ? x : null; } catch { return null; } };
   const writeDraft = (d: string, ids: string[] | null) => { try { if (ids) localStorage.setItem(draftKey(d), JSON.stringify(ids)); else localStorage.removeItem(draftKey(d)); } catch { /* 보관 못 해도 계속 */ } };
+  const baseRef = useRef<string[]>([]);   // 이 화면이 처음 본 그날 명단 (다른 창의 체크를 지우지 않게 서버에 함께 보냄)
   useEffect(() => {
+    baseRef.current = [...(data.attendance[date] || [])];
     const kept = readDraft(date);
     if (kept) { setSel(new Set(kept)); setDirty(true); setMsg('저장하지 않은 출석 체크를 다시 불러왔습니다. [출석 저장]을 눌러 주세요.'); }
     else { setSel(new Set(data.attendance[date] || [])); setDirty(false); setMsg(''); }
@@ -416,7 +423,7 @@ function Attendance({ data, reload }: { data: PeopleData; reload: () => Promise<
   }, [people]);
   const toggle = (id: string) => { const s = new Set(sel); s.has(id) ? s.delete(id) : s.add(id); setSel(s); setDirty(true); writeDraft(date, [...s]); };
   const save = async () => {
-    try { await api(`${base}/attendance/${date}`, { method: 'PUT', body: { memberIds: [...sel] } }); writeDraft(date, null); await reload(); setMsg('저장했습니다.'); setDirty(false); return true; } catch (e: any) { setMsg(e.message); return false; }
+    try { await api(`${base}/attendance/${date}`, { method: 'PUT', body: { memberIds: [...sel], _base: baseRef.current } }); writeDraft(date, null); await reload(); setMsg('저장했습니다.'); setDirty(false); return true; } catch (e: any) { setMsg(e.message); return false; }
   };
   // 저장하지 않은 체크가 있는데 날짜를 바꾸려 하면 먼저 저장할지 묻는다 (취소해도 체크는 그 날짜에 보관됨)
   const changeDate = async (d: string) => {

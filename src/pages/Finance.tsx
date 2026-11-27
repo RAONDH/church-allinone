@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../App';
 import { useGuardedClose } from '../lib/guard';
 import { clickable } from '../lib/a11y';
-import { api } from '../lib/api';
+import { api, peopleOrLocked } from '../lib/api';
 import type { Finance as FinanceData, FinanceSettings, Fund, Member, Tx } from '../lib/types';
-import { balances, budgetKey, budgetOf, byCategory, donorMonths, donors, FUNDS, monthly, parseWon, totals, won, type Donor } from '../lib/finance';
+import { balances, budgetKey, budgetOf, byCategory, isCarry, isReceiptCat, donorMonths, donors, FUNDS, monthly, parseWon, totals, won, type Donor } from '../lib/finance';
 import { lastSunday } from '../lib/people';
 import { fmtDate, ymd } from '../lib/week';
 
@@ -17,20 +17,21 @@ function useFinance() {
   const [data, setData] = useState<FinanceData | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [err, setErr] = useState('');
+  const [peopleLocked, setPeopleLocked] = useState(false);
   const load = useCallback(async () => {
     try {
-      const [f, p] = await Promise.all([api<FinanceData>(`${base}/finance`), api<{ members: Member[] }>(`${base}/people`)]);
-      setData(f); setMembers(p.members); setErr('');
+      const [f, p] = await Promise.all([api<FinanceData>(`${base}/finance`), peopleOrLocked<{ members: Member[] }>(base, { members: [] })]);
+      setData(f); setMembers(p.members); setPeopleLocked(!!p.peopleLocked); setErr('');
     } catch (e: any) { setErr(e.message); }
   }, [base]);
   useEffect(() => { load(); }, [load]);
-  return { data, members, err, load };
+  return { data, members, err, load, peopleLocked };
 }
 
 export default function Finance() {
   const { tab = 'ledger' } = useParams();
   const nav = useNavigate();
-  const { data, members, err, load } = useFinance();
+  const { data, members, err, load, peopleLocked } = useFinance();
   const t = TABS.some(([k]) => k === tab) ? tab : 'ledger';
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const years = useMemo(() => {
@@ -52,6 +53,7 @@ export default function Finance() {
         {TABS.map(([k, label]) => <button key={k} className={t === k ? 'on' : ''} onClick={() => nav(`/finance/${k}`)}>{label}</button>)}
       </div>
       {err && <p className="alert err">{err} <button onClick={load}>다시 시도</button></p>}
+      {peopleLocked && <p className="alert info small people-locked">🔒 성도 정보가 잠겨 있어 성도 이름 연결·주소는 보이지 않습니다. 성도 화면에서 잠금 암호를 넣어 풀면 함께 보입니다.</p>}
       {!data ? (!err && <p className="muted">불러오는 중…</p>)
         : t === 'ledger' ? <Ledger data={data} members={members} reload={load} />
         : t === 'report' ? <Report data={data} year={year} reload={load} />
@@ -62,7 +64,21 @@ export default function Finance() {
 }
 
 // ── 장부 ──────────────────────────────────────────
-interface Row { date: string; type: 'income' | 'expense'; fund: Fund; category: string; name: string; amount: string; note: string }
+interface Row { date: string; type: 'income' | 'expense'; fund: Fund; category: string; name: string; amount: string; note: string; memberId?: string }
+/** 명부에 같은 이름이 두 분 이상이면 그분들 (어느 분인지 고르게) */
+const sameName = (members: Member[], name: string) => { const n = name.trim(); const xs = n ? members.filter((m) => m.name === n) : []; return xs.length > 1 ? xs : []; };
+const whoLabel = (m: Member) => [m.name, m.group, m.role, m.birth && `${m.birth.slice(0, 4)}년생`].filter(Boolean).join(' · ');
+/** 동명이인 고르기 (헌금을 엉뚱한 분 영수증에 합치지 않게) */
+function WhichMember({ members, name, value, onChange }: { members: Member[]; name: string; value: string; onChange: (id: string) => void }) {
+  const xs = sameName(members, name);
+  if (!xs.length) return null;
+  return (
+    <select className={`which-member ${value ? '' : 'bad-input'}`} value={value} onChange={(e) => onChange(e.target.value)} aria-label={`${name.trim()} 님 가운데 어느 분인지`}>
+      <option value="">같은 이름 {xs.length}분 — 어느 분인가요?</option>
+      {xs.map((m) => <option key={m.id} value={m.id}>{whoLabel(m)}</option>)}
+    </select>
+  );
+}
 
 function Ledger({ data, members, reload }: { data: FinanceData; members: Member[]; reload: () => Promise<void> }) {
   const { base } = useApp();
@@ -214,7 +230,7 @@ function EntryForm({ data, members, onSaved }: { data: FinanceData; members: Mem
                 <td><select value={r.type} onChange={(e) => set(i, { type: e.target.value as Row['type'] })}><option value="income">수입</option><option value="expense">지출</option></select></td>
                 <td><select value={r.fund} onChange={(e) => set(i, { fund: e.target.value as Fund })}>{FUNDS.map((f) => <option key={f}>{f}</option>)}</select></td>
                 <td><select value={r.category} onChange={async (e) => { if (e.target.value === NEW_CAT) { const n = await newCategory(r.type, r.fund); if (n) set(i, { category: n }); } else set(i, { category: e.target.value }); }}>{cats(data.settings, r.type, r.fund).map((c) => <option key={c}>{c}</option>)}<option value={NEW_CAT}>+ 새 항목 만들기…</option></select></td>
-                <td><input className="entry-name" list={r.type === 'income' ? 'member-names' : undefined} value={r.name} onChange={(e) => set(i, { name: e.target.value })} placeholder={r.type === 'income' ? '헌금자 (무명 가능)' : '거래처'} /></td>
+                <td><input className="entry-name" list={r.type === 'income' ? 'member-names' : undefined} value={r.name} onChange={(e) => set(i, { name: e.target.value, memberId: '' })} placeholder={r.type === 'income' ? '헌금자 (무명 가능)' : '거래처'} />{r.type === 'income' && <WhichMember members={members} name={r.name} value={r.memberId || ''} onChange={(id) => set(i, { memberId: id })} />}</td>
                 <td><input className={`num ${unread(r) ? 'bad-input' : ''}`} aria-invalid={unread(r) || undefined} inputMode="numeric" value={r.amount} onChange={(e) => set(i, { amount: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); addRow(); } }} placeholder="0" />{r.amount && parseWon(r.amount) > 0 && !/^\d+$/.test(r.amount.replace(/[,\s]/g, '')) && <small className="muted">{won(parseWon(r.amount))}</small>}{unread(r) && <small className="warn-text entry-bad">금액을 읽지 못함</small>}</td>
                 <td><input value={r.note} onChange={(e) => set(i, { note: e.target.value })} /></td>
                 <td><button className="icon" aria-label="줄 빼기" disabled={rows.length === 1} onClick={() => setRows(rows.filter((_, j) => j !== i))}>×</button></td>
@@ -241,10 +257,11 @@ function TxDialog({ data, members, tx, onClose, reload }: { data: FinanceData; m
   const { base } = useApp();
   const member = members.find((m) => m.id === tx.memberId);
   const [f, setF] = useState({ date: tx.date, type: tx.type, fund: tx.fund, category: tx.category, name: member?.name || tx.name, amount: String(tx.amount), note: tx.note });
+  const [pickId, setPickId] = useState(member?.id || '');
   const [err, setErr] = useState('');
   const options = cats(data.settings, f.type, f.fund);
   const save = async () => {
-    try { await api(`${base}/finance/tx/${tx.id}`, { method: 'PUT', body: { ...f, amount: parseWon(f.amount), memberId: member && f.name === member.name ? member.id : '' } }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
+    try { await api(`${base}/finance/tx/${tx.id}`, { method: 'PUT', body: { ...f, amount: parseWon(f.amount), memberId: pickId && members.find((m) => m.id === pickId)?.name === f.name.trim() ? pickId : '' } }); await reload(); onClose(); } catch (e: any) { setErr(e.message); }
   };
   const remove = async () => {
     if (!confirm(`${fmtDate(tx.date)} ${tx.category} ${won(tx.amount)} 기록을 지울까요? 되돌릴 수 없습니다.`)) return;
@@ -260,7 +277,7 @@ function TxDialog({ data, members, tx, onClose, reload }: { data: FinanceData; m
           <label>구분<select value={f.type} onChange={(e) => { const type = e.target.value as Tx['type']; setF({ ...f, type, category: cats(data.settings, type, f.fund).includes(f.category) ? f.category : cats(data.settings, type, f.fund)[0] || '' }); }}><option value="income">수입</option><option value="expense">지출</option></select></label>
           <label>재정<select value={f.fund} onChange={(e) => { const fund = e.target.value as Fund; setF({ ...f, fund, category: cats(data.settings, f.type, fund).includes(f.category) ? f.category : cats(data.settings, f.type, fund)[0] || '' }); }}>{FUNDS.map((x) => <option key={x}>{x}</option>)}</select></label>
           <label>항목<select value={f.category} onChange={async (e) => { if (e.target.value === NEW_CAT) { const n = await askCategory(base, f.type, f.fund, reload); if (n) setF({ ...f, category: n }); } else setF({ ...f, category: e.target.value }); }}>{[...new Set([...options, f.category])].filter(Boolean).map((c) => <option key={c}>{c}</option>)}<option value={NEW_CAT}>+ 새 항목 만들기…</option></select></label>
-          <label>이름·거래처<input list="member-names-edit" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label>이름·거래처<input list="member-names-edit" value={f.name} onChange={(e) => { setF({ ...f, name: e.target.value }); setPickId(''); }} />{f.type === 'income' && <WhichMember members={members} name={f.name} value={pickId} onChange={setPickId} />}</label>
           <label>금액<input inputMode="numeric" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></label>
           <label className="span2">메모<input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></label>
         </div>
@@ -388,9 +405,13 @@ function Report({ data, year, reload }: { data: FinanceData; year: string; reloa
 function Receipts({ data, members, year, reload }: { data: FinanceData; members: Member[]; year: string; reload: () => Promise<void> }) {
   const { base, ov } = useApp();
   const nav = useNavigate();
-  const list = useMemo(() => donors(data.tx, year, members), [data.tx, year, members]);
+  const all = useMemo(() => donors(data.tx, year, members, data.settings.receiptOverride), [data.tx, year, members, data.settings.receiptOverride]);
+  const list = all.filter((x) => !x.ambiguous);
+  const unsure = all.filter((x) => x.ambiguous);   // 동명이인: 어느 분인지 정하기 전에는 영수증을 만들지 않음
+  const book = data.receipts?.[year];
+  const issued = (x: Donor) => { const it = book?.items[x.key]; return it && !it.canceled ? it : null; };
   const [sel, setSel] = useState<string>('');
-  const [printAll, setPrintAll] = useState(false);
+  const [printing, setPrinting] = useState<Donor[]>([]);
   const [msg, setMsg] = useState('');
   const d = list.find((x) => x.key === sel) || null;
   const r = data.settings.receipt;
@@ -399,7 +420,18 @@ function Receipts({ data, members, year, reload }: { data: FinanceData; members:
   const relink = async () => {
     try { const x = await api<{ linked: number }>(`${base}/finance/relink`, { method: 'POST' }); await reload(); setMsg(`${x.linked}건을 명부의 성도와 이었습니다.`); } catch (e: any) { setMsg(e.message); }
   };
-  const print = (all: boolean) => { setPrintAll(all); setTimeout(() => window.print(), 50); };
+  // 인쇄하기 전에 발급 대장에 적는다: 처음이면 다음 번호를 받고, 다시 인쇄하면 같은 번호에 그때 금액을 남긴다
+  const issue = (x: Donor) => api(`${base}/finance/receipts/${year}`, { method: 'POST', body: { action: 'issue', key: x.key, name: x.name, total: x.total } });
+  const print = async (xs: Donor[]) => {
+    try { for (const x of xs) { const it = issued(x); if (!it || it.total !== x.total) await issue(x); } await reload(); }
+    catch (e: any) { setMsg(e.message); return; }
+    setPrinting(xs); setTimeout(() => window.print(), 80);
+  };
+  const cancel = async (x: Donor) => {
+    if (!confirm(`${x.name} 님 영수증 발급을 취소할까요? 번호 ${year}-${String(issued(x)?.no).padStart(3, '0')}는 비워 두고 다시 쓰지 않습니다.`)) return;
+    try { await api(`${base}/finance/receipts/${year}`, { method: 'POST', body: { action: 'cancel', key: x.key } }); await reload(); } catch (e: any) { setMsg(e.message); }
+  };
+  const noOf = (x: Donor) => issued(x)?.no || 0;
   const ctx = { church: ov?.church?.name || '', pastor: r.representative || ov?.church?.pastor || '', regNo: r.regNo, address: r.address, year };
   return (
     <>
@@ -412,21 +444,31 @@ function Receipts({ data, members, year, reload }: { data: FinanceData; members:
         <div className="card">
           <div className="row between">
             <h3>{year}년 헌금자 {list.length}명</h3>
-            <button disabled={!list.length} onClick={() => print(true)}>모두 인쇄</button>
+            <button disabled={!list.length} onClick={() => print(list)}>모두 발급·인쇄</button>
           </div>
           {!list.length ? <p className="muted">{year}년 헌금 기록이 없습니다. (이월금·무명 헌금은 영수증에서 뺍니다)</p> : (
             <table className="people-table">
-              <thead><tr><th>이름</th><th className="num">건수</th><th className="num">합계</th></tr></thead>
+              <thead><tr><th>이름</th><th className="num">건수</th><th className="num">합계</th><th>발급 번호</th></tr></thead>
               <tbody>
-                {list.map((x) => (
-                  <tr key={x.key} className={sel === x.key ? 'on' : ''} onClick={() => setSel(x.key)}>
-                    <td><b>{x.name}</b>{!x.member && <span className="muted small" title="성도 명부에 없는 이름"> *</span>}</td>
-                    <td className="num">{x.count}</td>
-                    <td className="num">{won(x.total)}</td>
-                  </tr>
-                ))}
+                {list.map((x) => {
+                  const it = issued(x), changed = !!it && it.total !== x.total;
+                  return (
+                    <tr key={x.key} className={sel === x.key ? 'on' : ''} {...clickable(() => setSel(x.key))}>
+                      <td><b>{x.name}</b>{!x.member && <span className="muted small" title="성도 명부에 없는 이름"> *</span>}</td>
+                      <td className="num">{x.count}</td>
+                      <td className="num">{won(x.total)}</td>
+                      <td className="small">{it ? <>{year}-{String(it.no).padStart(3, '0')}{changed && <span className="warn-text" title={`발급할 때 ${won(it.total)}`}> · 발급 뒤 금액 바뀜</span>}</> : <span className="muted">미발급</span>}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          )}
+          {unsure.length > 0 && (
+            <div className="alert warn small receipt-unsure">
+              <b>누구 헌금인지 확인이 필요합니다</b> (명부에 같은 이름이 두 분 이상): {unsure.map((x) => `${x.name} ${x.count}건 ${won(x.total)}`).join(', ')}.
+              한 사람 것으로 합치지 않고 영수증도 만들지 않습니다. 장부에서 그 기록을 눌러 <b>어느 분인지</b> 골라 주세요.
+            </div>
           )}
           {unlinked.length > 0 && (
             <p className="muted small">* {unlinked.length}명은 성도 명부에 없는 이름입니다. 성도 명부에 같은 이름으로 넣으면 그 성도로 모이고 주소도 영수증에 들어갑니다. (장부 기록까지 이어 두려면 <button className="link" onClick={relink}>명부와 다시 맞추기</button>)</p>
@@ -436,14 +478,15 @@ function Receipts({ data, members, year, reload }: { data: FinanceData; members:
         <div className="card">
           {d ? (
             <>
-              <div className="row between"><h3>{d.name} 님 영수증</h3><button className="primary" onClick={() => print(false)}>인쇄</button></div>
-              <ReceiptDoc d={d} n={list.indexOf(d) + 1} {...ctx} preview />
+              <div className="row between"><h3>{d.name} 님 영수증</h3><div className="row">{issued(d) && <button className="danger-link small" onClick={() => cancel(d)}>발급 취소</button>}<button className="primary" onClick={() => print([d])}>{issued(d) ? (issued(d)!.total !== d.total ? '금액 바꿔 다시 발급·인쇄' : '다시 인쇄') : '발급·인쇄'}</button></div></div>
+              {issued(d) && issued(d)!.total !== d.total && <p className="alert warn small">발급한 뒤 금액이 바뀌었습니다 (발급할 때 {won(issued(d)!.total)} → 지금 {won(d.total)}). 다시 발급하면 같은 번호로 지금 금액을 적습니다.</p>}
+              <ReceiptDoc d={d} n={noOf(d)} {...ctx} preview />
             </>
           ) : <p className="muted">왼쪽에서 이름을 누르면 영수증을 미리 봅니다.</p>}
         </div>
       </div>
       <div className="print-area receipts-print">
-        {(printAll ? list : d ? [d] : []).map((x) => <ReceiptDoc key={x.key} d={x} n={list.indexOf(x) + 1} {...ctx} />)}
+        {printing.map((x) => <ReceiptDoc key={x.key} d={x} n={noOf(x)} {...ctx} />)}
       </div>
     </>
   );
@@ -453,7 +496,7 @@ function ReceiptDoc({ d, n, church, pastor, regNo, address, year, preview = fals
   const months = donorMonths(d);
   return (
     <div className="receipt">
-      <div className="receipt-no">일련번호 {year}-{String(n).padStart(3, '0')}</div>
+      <div className="receipt-no">일련번호 {n ? `${year}-${String(n).padStart(3, '0')}` : '(발급하면 번호가 붙습니다)'}</div>
       <h2 className="receipt-title">기 부 금 영 수 증</h2>
       <table>
         <tbody>
@@ -503,7 +546,7 @@ function Settings({ data, reload }: { data: FinanceData; reload: () => Promise<v
           <li>같은 파일을 다시 가져와도 이미 들어온 기록은 겹치지 않습니다. 회계장부에 새로 적은 것만 더해집니다.</li>
           <li>헌금자 이름이 성도 명부의 한 분과 같으면 자동으로 이어집니다.</li>
         </ul>
-        {ws === 'sample' && <p className="alert warn small">지금은 예제 자료입니다. 실제 장부는 왼쪽 메뉴 아래 '우리 교회'로 바꾼 뒤 가져오세요.</p>}
+        {ws === 'sample' && <p className="alert warn small">지금은 예제 자료입니다. 실제 장부는 오른쪽 위 '우리 교회'로 바꾼 뒤 가져오세요.</p>}
         <input type="file" accept=".json,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ''; }} />
         {imp && <p className="small">{imp}</p>}
       </div>
@@ -516,7 +559,33 @@ function Settings({ data, reload }: { data: FinanceData; reload: () => Promise<v
         </div>
         <div className="row end">{msg && <span className="muted">{msg}</span>}<button className="primary" onClick={save}>교회 정보 저장</button></div>
       </div>
+      <ReceiptCats data={data} reload={reload} />
       <CategoryEditor data={data} reload={reload} />
+    </div>
+  );
+}
+
+// 기부금 영수증에 넣을 수입 항목 고르기 (차입금·이자·기타수입처럼 헌금이 아닌 수입은 빼야 영수증 합계가 맞다)
+function ReceiptCats({ data, reload }: { data: FinanceData; reload: () => Promise<void> }) {
+  const { base } = useApp();
+  const [msg, setMsg] = useState('');
+  const o = data.settings.receiptOverride || {};
+  const names = [...new Set([...FUNDS.flatMap((f) => data.settings.categories.income[f] || []), ...data.tx.filter((t) => t.type === 'income').map((t) => t.category)])].filter((c) => !isCarry(c));
+  const toggle = async (c: string, on: boolean) => {
+    setMsg('');
+    try { await api(`${base}/finance/settings`, { method: 'PUT', body: { receiptOverride: { ...o, [c]: on } } }); await reload(); }
+    catch (e: any) { setMsg(e.message); }
+  };
+  return (
+    <div className="card receipt-cats">
+      <h2>기부금 영수증에 넣을 수입 항목</h2>
+      <p className="muted small">체크한 항목만 영수증 합계에 들어갑니다. 처음에는 이름이 ‘헌금’으로 끝나는 항목과 십일조만 체크되어 있고, 차입금·이자·기타수입·이월금처럼 헌금이 아닌 수입은 빠집니다.</p>
+      <div className="chips">
+        {names.map((c) => (
+          <label key={c} className="check chip-check"><input type="checkbox" checked={isReceiptCat(c, o)} onChange={(e) => toggle(c, e.target.checked)} />{c}</label>
+        ))}
+      </div>
+      {msg && <p className="warn-text small">{msg}</p>}
     </div>
   );
 }
