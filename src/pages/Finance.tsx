@@ -503,7 +503,7 @@ function Settings({ data, reload }: { data: FinanceData; reload: () => Promise<v
           <li>같은 파일을 다시 가져와도 이미 들어온 기록은 겹치지 않습니다. 회계장부에 새로 적은 것만 더해집니다.</li>
           <li>헌금자 이름이 성도 명부의 한 분과 같으면 자동으로 이어집니다.</li>
         </ul>
-        {ws === 'sample' && <p className="alert warn small">지금은 예제 자료입니다. 실제 장부는 오른쪽 위 '우리 교회'로 바꾼 뒤 가져오세요.</p>}
+        {ws === 'sample' && <p className="alert warn small">지금은 예제 자료입니다. 실제 장부는 왼쪽 메뉴 아래 '우리 교회'로 바꾼 뒤 가져오세요.</p>}
         <input type="file" accept=".json,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (f) importFile(f); e.target.value = ''; }} />
         {imp && <p className="small">{imp}</p>}
       </div>

@@ -654,6 +654,45 @@ export async function runUi() {
         await page.waitForFunction(() => !document.querySelector('.dialog'), { timeout: 3000 });
         noErrors('키보드');
       }],
+      ['왼쪽 메뉴(예제): 하는 일별 묶음이 보이고, 누르면 그 화면이 열려 그 칸만 강조되며, 화면 크게 보기를 켜면 글자가 커진다', async () => {
+        await go('/?ws=sample');
+        const groups = await page.$$eval('.side-group-name', (xs) => xs.map((x) => x.textContent));
+        eq(groups, ['예배 준비', '사람 돌봄', '재정', '행정·문서', '설정·도움'], '메뉴 묶음');
+        const active = () => page.$$eval('.side-nav a[aria-current="page"]', (xs) => xs.map((x) => x.textContent));
+        eq(await active(), ['이번 주 준비함'], '홈에서 강조된 칸');
+        for (const [label, path] of [['심방', '/people/visits'], ['기부금 영수증', '/finance/receipts'], ['회의록', '/admin/minutes'], ['봉사 배정', '/admin/serve'], ['성도 명부', '/people']]) {
+          await page.evaluate((t) => [...document.querySelectorAll('.side-nav a')].find((a) => a.textContent === t)?.click(), label);
+          await page.waitForFunction((p) => location.pathname === p, { timeout: 5000 }, path).catch(() => { throw new Error(`"${label}"을 눌러도 ${path} 로 가지 않았습니다 (지금 ${page.url()})`); });
+          eq(await active(), [label], `${label}: 강조된 칸`);
+        }
+        has(await page.$eval('.top-context', (x) => x.textContent), '이번 주일', '위쪽 날짜 줄');
+        ok(/D-\d|오늘/.test(await page.$eval('.dday', (x) => x.textContent)), '이번 주일까지 남은 날');
+        const size = () => page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).fontSize));
+        eq(await size(), 16, '처음 글자 크기');
+        await page.click('.big-toggle input'); await sleep(100);
+        eq(await size(), 18, '크게 보기 켠 뒤 글자 크기');
+        await page.reload({ waitUntil: 'networkidle0' });
+        eq(await size(), 18, '다시 열어도 크게 보기 유지');
+        await page.click('.big-toggle input'); await sleep(100);
+        eq(await size(), 16, '끈 뒤 글자 크기');
+        noErrors('왼쪽 메뉴');
+      }],
+      ['왼쪽 메뉴(휴대폰 크기): 메뉴는 접혀 있다가 [메뉴]로 펼치고, 고르면 다시 접힌다', async () => {
+        await page.setViewport({ width: 390, height: 844 });
+        try {
+          await go('/?ws=sample');
+          const shown = () => page.$eval('.side-nav', (x) => getComputedStyle(x).display !== 'none');
+          eq(await shown(), false, '처음에는 접힘');
+          await page.click('.side-toggle'); await sleep(100);
+          eq(await shown(), true, '[메뉴]를 누르면 펼침');
+          await page.evaluate(() => [...document.querySelectorAll('.side-nav a')].find((a) => a.textContent === '출석')?.click());
+          await page.waitForFunction(() => location.pathname === '/people/attendance', { timeout: 5000 });
+          await sleep(100);
+          eq(await shown(), false, '고른 뒤 다시 접힘');
+          ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), '옆으로 넘치지 않음');
+        } finally { await page.setViewport({ width: 1280, height: 900 }); }
+        noErrors('휴대폰 메뉴');
+      }],
       ['봉사 칸(예제): 이름 단추로만 바꿔도 닫기 전에 묻는다', async () => {
         await go('/admin/serve?ws=sample');
         await page.evaluate(() => document.querySelector('.serve-cell')?.click());

@@ -57,7 +57,7 @@ function LockScreen({ area }: { area: string }) {
   );
 }
 
-/** 위쪽 메뉴의 '잠그기' 단추 (잠금을 켰고 지금 풀려 있을 때) */
+/** 위쪽 줄의 '잠그기' 단추 (잠금을 켰고 지금 풀려 있을 때) */
 export function LockButton() {
   const { lv, reload } = useLock();
   if (!lv?.enabled || !lv.unlocked) return null;

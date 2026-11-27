@@ -1,4 +1,4 @@
-// 새 버전 알림 창 · 위 메뉴의 🔔 새 버전 단추 · 다시 켜진 뒤 저절로 새로 고침
+// 새 버전 알림 창 · 위쪽 줄의 🔔 새 버전 단추 · 다시 켜진 뒤 저절로 새로 고침
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { busyNow } from '../lib/busy';

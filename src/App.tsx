@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, ApiError } from './lib/api';
 import { installDialogA11y } from './lib/a11y';
+import { SideMenu, TopLine } from './pages/SideMenu';
 import Recovery from './pages/Recovery';
 import type { AppInfo, Overview, Ws } from './lib/types';
 import Home from './pages/Home';
@@ -56,25 +57,14 @@ export default function App() {
         </div>
       )}
       <SaveWarn base={base} />
-      <header className="top">
-        <NavLink to="/" className="brand">라온 교회 올인원{ov?.church ? <small>{ov.church.name}</small> : null}</NavLink>
-        <nav>
-          <NavLink to="/" end>이번 주 준비함</NavLink>
-          <NavLink to="/people">성도</NavLink>
-          <NavLink to="/finance">재정</NavLink>
-          <NavLink to="/admin">행정</NavLink>
-          <NavLink to="/songs">찬양 자료</NavLink>
-          <NavLink to="/apps">프로그램</NavLink>
-          <NavLink to="/settings">설정</NavLink>
-          <NavLink to="/guide">사용설명서</NavLink>
-        </nav>
+      {/* 왼쪽 묶음 메뉴 + 오른쪽 화면 (좁은 화면에서는 메뉴가 위로 접힘) */}
+      <div className="shell">
+      <SideMenu church={ov?.church?.name || ''} ws={ws} setWs={setWs} />
+      <div className="shell-main">
+      <TopLine church={ov?.church?.name || ''} ws={ws}>
         <LockButton />
         <UpdateBell u={update.u} onOpen={() => update.setOpen(true)} />
-        <div className="ws-toggle" role="group" aria-label="자료 선택">
-          <button className={ws === 'real' ? 'on' : ''} onClick={() => setWs('real')}>우리 교회</button>
-          <button className={ws === 'sample' ? 'on sample' : ''} onClick={() => setWs('sample')}>예제</button>
-        </div>
-      </header>
+      </TopLine>
       <main>
         {broken && ws === 'real' ? <Recovery onDone={recovered} />
           : loadError ? <div className="alert err">{loadError} <button onClick={reload}>다시 시도</button></div>
@@ -99,10 +89,12 @@ export default function App() {
             </Routes>
           )}
       </main>
-      {update.open && update.u?.available && <UpdateDialog u={update.u} setU={update.setU} onClose={() => update.setOpen(false)} />}
       <footer className="site-foot">
         라온 교회 올인원은 무료로 쓰실 수 있습니다. <NavLink to="/settings#support">후원 안내</NavLink> · <a href="https://open.kakao.com/o/gSkET2Wi" target="_blank" rel="noopener">카카오 오픈채팅 문의</a>
       </footer>
+      </div>
+      </div>
+      {update.open && update.u?.available && <UpdateDialog u={update.u} setU={update.setU} onClose={() => update.setOpen(false)} />}
      </LockProvider>
     </C.Provider>
   );
